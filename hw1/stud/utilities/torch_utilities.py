@@ -8,7 +8,6 @@ from seqeval.metrics import f1_score
 from seqeval.scheme import IOB2
 import numpy as np
 import nltk
-import itertools
 from tqdm import tqdm
 from copy import copy
 import os
@@ -16,6 +15,7 @@ from .embeddings_utilities import load_embeddings
 
 nltk.download("maxent_ne_chunker")
 nltk.download("words")
+nltk.download('averaged_perceptron_tagger')
 
 
 class ModelData(Dataset):
@@ -154,7 +154,7 @@ def trainer(
                         torch.nn.utils.rnn.pad_packed_sequence(
                             y_batch, batch_first=True, padding_value=12
                         )[0],
-                        ignore_index=12,
+                        ignore_index=12, weight=torch.tensor([1]*10 + [0.001]).to(torch_device)
                     )  # compute categorical cross-entropy
                     loss.backward()  # Call backward propagation on the loss
                     optimizer.step()  # Move in the parameter space
@@ -183,7 +183,8 @@ def trainer(
 
                         # add loss for single batch from validation
                         loss_accum += torch.nn.functional.cross_entropy(
-                            torch.swapaxes(y_pred, 1, 2), y_batch, ignore_index=12
+                            torch.swapaxes(y_pred, 1, 2), y_batch, ignore_index=12,
+                            weight=torch.tensor([1]*10 + [0.0001]).to(torch_device)
                         ).item()
                         y_pred = torch.argmax(y_pred, -1)
                         y_batch = y_batch.tolist()
@@ -220,7 +221,7 @@ def trainer(
                     seq_F1.append(validation_f1/len(dataloaders[stage]))
 
         p_bar.set_description(
-            f"MOV TRAIN: {sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train'])}"
+            f"MOV TRAIN: {sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train'])} "
             f"VAL: {val_loss[-1]}; F1_VAL: {seq_F1[-1]}"
         )
 

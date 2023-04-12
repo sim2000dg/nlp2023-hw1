@@ -4,7 +4,7 @@ import torch
 class BiLSTM(torch.nn.Module):
     def __init__(self, emb_size, n_out, hidden_units, layer_n, dropout_p):
         super().__init__()
-        self.lstm_block = torch.nn.LSTM(
+        self.lstm_block = torch.nn.GRU(
             input_size=emb_size,
             hidden_size=hidden_units,
             num_layers=layer_n,
@@ -40,4 +40,4 @@ if __name__ == '__main__':
                    'valid': val_dataloader}
 
     trainer(BiLSTM(100, len(training_data.target_encoder.classes_),
-                   500, 3, 0), 20, 1e-2, dataloaders, torch_device=torch.device('cpu'))
+                   300, 5, 0), 20, 1e-2, dataloaders, torch_device=torch.device('cpu'))
