@@ -159,7 +159,6 @@ def trainer(
                     loss.backward()  # Call backward propagation on the loss
                     optimizer.step()  # Move in the parameter space
                     optimizer.zero_grad()  # set to zero gradients
-                    print(loss.item())
                     loss_history.append(loss.item())  # append to loss_history
                     p_bar.set_postfix({'epoch batch': batch_acc, 'batch loss': loss.item()})
                     batch_acc += 1
