@@ -140,6 +140,7 @@ def trainer(
     for _ in (p_bar := tqdm(range(epochs), total=epochs, position=0, leave=True)):
         for stage in ["train", "valid"]:
             if stage == "train":
+                batch_acc = 0
                 model_.train()  # Set train mode for model (For Dropout)
                 for x_batch, y_batch, _ in dataloaders[
                     stage
@@ -155,10 +156,13 @@ def trainer(
                         )[0],
                         ignore_index=12,
                     )  # compute categorical cross-entropy
-                    loss_history.append(loss.item())  # append to loss_history
                     loss.backward()  # Call backward propagation on the loss
                     optimizer.step()  # Move in the parameter space
                     optimizer.zero_grad()  # set to zero gradients
+                    print(loss.item())
+                    loss_history.append(loss.item())  # append to loss_history
+                    p_bar.set_postfix({'epoch batch': batch_acc, 'batch loss': loss.item()})
+                    batch_acc += 1
             else:
                 with torch.no_grad():  # we do not need gradients when calculating validation loss and accuracy
                     loss_accum = 0  # Initialize to 0 the loss for the single iteration on the validation set
@@ -168,7 +172,7 @@ def trainer(
                         stage
                     ]:  # Access the dataloader for validation
                         # Move the input tensor to right device
-                        x_batch = x_batch.to(torch_device)
+                        x_batch, y_batch = x_batch.to(torch_device), y_batch.to(torch_device)
 
                         y_pred, len_seq = model_(
                             x_batch
@@ -182,7 +186,7 @@ def trainer(
                         loss_accum += torch.nn.functional.cross_entropy(
                             torch.swapaxes(y_pred, 1, 2), y_batch, ignore_index=12
                         ).item()
-                        y_pred = torch.argmin(y_pred, -1)
+                        y_pred = torch.argmax(y_pred, -1)
                         y_batch = y_batch.tolist()
                         y_batch = [
                             np.repeat(sent[:sent_len], reps).tolist()
@@ -214,10 +218,10 @@ def trainer(
 
                     # append mean validation loss (mean over the number of batches)
                     val_loss.append(loss_accum / len(dataloaders[stage]))
-                    seq_F1.append(validation_f1)
+                    seq_F1.append(validation_f1/len(dataloaders[stage]))
 
         p_bar.set_description(
-            f'TRAIN: {sum(loss_history) / len(dataloaders["train"])};'
+            f"MOV TRAIN: {sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train'])}"
             f"VAL: {val_loss[-1]}; F1_VAL: {seq_F1[-1]}"
         )
 

@@ -32,9 +32,9 @@ if __name__ == '__main__':
 
     training_data = ModelData("../../data", embeddings)
     val_data = ModelData("../../data", embeddings, 'dev')
-    train_dataloader = DataLoader(training_data, batch_size=64,
+    train_dataloader = DataLoader(training_data, batch_size=256,
                                   shuffle=True, collate_fn=obs_collate)
-    val_dataloader = DataLoader(val_data, batch_size=200,
+    val_dataloader = DataLoader(val_data, batch_size=500,
                                 collate_fn=obs_collate)
     dataloaders = {'train': train_dataloader,
                    'valid': val_dataloader}
