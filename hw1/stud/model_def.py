@@ -59,7 +59,7 @@ class BiLSTMClassifier(torch.nn.Module):
         self.fc_block = torch.nn.ModuleList()
 
         if layer_dense > 1:
-            dense_shift = (2 * hidden_units - 11) // (layer_dense - 1)
+            dense_shift = (2 * hidden_units - 11) // layer_dense
             for index in range(layer_dense - 1):
                 dense_in = 2 * hidden_units - dense_shift * index
                 dense_out = 2 * hidden_units - dense_shift * (index + 1)
@@ -264,5 +264,5 @@ if __name__ == '__main__':
     dataloaders = {'train': train_dataloader,
                    'valid': val_dataloader}
 
-    model = BiLSTMClassifier(embeddings, 'LSTM', 100, 2, 3, 0)
+    model = BiLSTMClassifier(embeddings, 'LSTM', 100, 2, 5, 0)
     model.fit(20, 1e-3, 1e-4, dataloaders, torch.device('cpu'))
