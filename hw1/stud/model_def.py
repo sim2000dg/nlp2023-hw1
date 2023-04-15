@@ -1,7 +1,8 @@
 import torch
-from tdqm import tqdm
+from tqdm import tqdm
 from seqeval.metrics import f1_score
 from seqeval.scheme import IOB2
+from torch.utils.data import DataLoader
 import numpy as np
 from copy import deepcopy
 
@@ -9,8 +10,9 @@ from copy import deepcopy
 class BiLSTMClassifier(torch.nn.Module):
     """
     Main model class, relatively flexible in order to facilitate hyperparameter tuning. More details about the model
-    can be found looking at the initialization method. Training operations are performed by the `trainer` function.
+    can be found looking at the initialization method. Training operations are performed by the `fit` function.
     """
+
     def __init__(
         self,
         embedding_matrix: torch.tensor,
@@ -45,7 +47,7 @@ class BiLSTMClassifier(torch.nn.Module):
         if rnn_type == "GRU":
             self.rnn_block = torch.nn.GRU(**self.param_dict)
         elif rnn_type == "LSTM":
-            self.rnn_block = torch.nn.LSTM(*self.param_dict)
+            self.rnn_block = torch.nn.LSTM(**self.param_dict)
         elif rnn_type == "RNN":
             self.rnn_block = torch.nn.RNN(**self.param_dict)
         else:
@@ -70,6 +72,9 @@ class BiLSTMClassifier(torch.nn.Module):
         self.fc_block.append(torch.nn.Linear(dense_out, 11))
 
     def forward(self, input_data):
+        """
+        Forward pass for the model.
+        """
         x, y = input_data
         x, len_sents = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
         x = self.tok_embedding(x)
@@ -86,14 +91,23 @@ class BiLSTMClassifier(torch.nn.Module):
 
         return x, len_seq
 
-    def trainer(
+    def fit(
         self,
         epochs: int,
         learning_r: float,
         l2_regularization: float,
-        dataloaders: list[DataLoader, DataLoader],
+        dataloaders: dict[DataLoader, DataLoader],
         torch_device: torch.device,
-    ):
+    ) -> tuple[dict, list[float, ...], list[float, ...], list[float, ...]]:
+        """
+        Training routine.
+        :param epochs: number of epochs.
+        :param learning_r: learning rate for Adam optimizer.
+        :param l2_regularization: L2 regularization factor (or weight decay).
+        :param dataloaders: A dictionary with training and validation dataloader.
+        :param torch_device: The specific device chosen for training/validation.
+        :return: Best model weights + training loss list + validation loss list + F1 score list
+        """
         self.to(torch_device)  # Move model weights to device
         optimizer = torch.optim.Adam(
             self.parameters(), lr=learning_r, weight_decay=l2_regularization
@@ -122,10 +136,7 @@ class BiLSTMClassifier(torch.nn.Module):
                             [x_batch, pos_tags]
                         )  # get predictions from model
                         y_batch = torch.nn.utils.rnn.pad_packed_sequence(
-                            y_batch, batch_first=True, padding_value=12
-                        )[
-                            0
-                        ]  # Pad ground truth
+                            y_batch, batch_first=True, padding_value=12)[0]  # Pad ground truth
                         loss = torch.nn.functional.cross_entropy(
                             torch.swapaxes(y_pred, 1, 2),
                             y_batch,
@@ -163,10 +174,7 @@ class BiLSTMClassifier(torch.nn.Module):
                                 [x_batch, pos_tags]
                             )  # Get prediction from validation
                             y_batch = torch.nn.utils.rnn.pad_packed_sequence(
-                                y_batch, batch_first=True, padding_value=12
-                            )[
-                                0
-                            ]  # Ground truth
+                                y_batch, batch_first=True, padding_value=12)[0]  # Ground truth
                             # add to accumulator loss for single batch from validation
                             loss_accum += torch.nn.functional.cross_entropy(
                                 torch.swapaxes(y_pred, 1, 2),
@@ -237,25 +245,24 @@ class BiLSTMClassifier(torch.nn.Module):
         return best_model, loss_history, val_loss, seq_F1
 
 
-# if __name__ == '__main__':
-#     from utilities import trainer, ModelData, obs_collate, load_embeddings
-#     import os
-#     from torch.utils.data import DataLoader
-#     import numpy as np
-#
-#     device = torch.device(
-#         'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
-#
-#     embeddings, embedding_ind = load_embeddings(os.path.join("../../model", "embeddings.txt"))
-#
-#     training_data = ModelData("../../data", embedding_ind)
-#     val_data = ModelData("../../data", embedding_ind, 'dev')
-#     train_dataloader = DataLoader(training_data, batch_size=128,
-#                                   shuffle=True, collate_fn=obs_collate)
-#     val_dataloader = DataLoader(val_data, batch_size=500,
-#                                 collate_fn=obs_collate)
-#     dataloaders = {'train': train_dataloader,
-#                    'valid': val_dataloader}
-#
-#     trainer(BiLSTMClassifier('LSTM', 100, len(training_data.target_encoder.classes_),
-#                              200, 2, 3, 0), 20, 1e-3, dataloaders, torch_device=torch.device('cpu'))
+if __name__ == '__main__':
+    from utilities import ModelData, obs_collate, load_embeddings
+    import os
+    import numpy as np
+
+    device = torch.device(
+        'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
+
+    embeddings, embedding_ind = load_embeddings(os.path.join("../../model", "embeddings.txt"))
+
+    training_data = ModelData("../../data", embedding_ind)
+    val_data = ModelData("../../data", embedding_ind, 'dev')
+    train_dataloader = DataLoader(training_data, batch_size=128,
+                                  shuffle=True, collate_fn=obs_collate)
+    val_dataloader = DataLoader(val_data, batch_size=500,
+                                collate_fn=obs_collate)
+    dataloaders = {'train': train_dataloader,
+                   'valid': val_dataloader}
+
+    model = BiLSTMClassifier(embeddings, 'LSTM', 100, 2, 3, 0)
+    model.fit(20, 1e-3, 1e-4, dataloaders, torch.device('cpu'))
