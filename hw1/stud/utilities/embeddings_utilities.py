@@ -4,12 +4,20 @@ import requests
 import bz2
 import os
 import shutil
+
+import torch
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
 
 
 def download_embeddings(dimension: str, path: str) -> str:
+    """
+    Utility function to download the Wikipedia2Vec (no link graph) embeddings from the online repository.
+    :param dimension: Dimensionality of embeddings downloaded. Small(100)/Medium(300)/Big(500) are the only choices.
+    :param path: Folder where to store the embeddings.
+    :return: The path where the embeddings are stored.
+    """
     if os.path.exists(os.path.join(path, "embeddings.txt")):
         print("The embeddings are already downloaded.")
         return os.path.join(path, "embeddings.txt")
@@ -51,11 +59,19 @@ def load_embeddings(path: str):
     embeddings = pd.read_csv(
         path, sep=" ", header=None, index_col=0, skiprows=1
     ).astype(np.float32)
+    tokens = embeddings.index.str.lower().tolist()
+    embeddings = embeddings.to_numpy()
+    oov = (
+        np.random.default_rng(1234)
+        .normal(
+            loc=embeddings.mean(),
+            scale=embeddings.std(axis=1).mean(),
+            size=embeddings.shape[1],
+        )
+        .astype(np.float32)
+    )
+    embeddings = np.append(embeddings, oov[np.newaxis, :], axis=0)
 
-    return embeddings.to_numpy(), dict(zip(embeddings.index.tolist(), range(len(embeddings))))
+    return torch.from_numpy(embeddings), dict(zip(tokens, range(len(embeddings)-1)))
 
 
-if __name__ == "__main__":
-    # download_embeddings('small', '../../model')
-    test = load_embeddings('../../model/embeddings.txt')
-    pass

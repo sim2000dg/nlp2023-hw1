@@ -1,17 +1,15 @@
+import string
+
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from sklearn.preprocessing import LabelEncoder
 import json
 from nltk.chunk import ne_chunk_sents
 from nltk.tag import pos_tag_sents
-from seqeval.metrics import f1_score
-from seqeval.scheme import IOB2
 import numpy as np
 import nltk
-from tqdm import tqdm
 from copy import copy
 import os
-from .embeddings_utilities import load_embeddings
 
 nltk.download("maxent_ne_chunker")
 nltk.download("words")
@@ -19,226 +17,145 @@ nltk.download('averaged_perceptron_tagger')
 
 
 class ModelData(Dataset):
-    def __init__(self, data_folder: str, embeddings, subset: str = "train") -> None:
-        self.tokens = dict()
-        self.labels = dict()
-        self.embeddings, self.index_emb = embeddings
-        self.oov = (
-            np.random.default_rng(1234)
-            .normal(
-                loc=self.embeddings.mean(),
-                scale=self.embeddings.std(axis=1).mean(),
-                size=self.embeddings.shape[1],
-            )
-            .astype(np.float32)
-        )
-        self.embeddings = np.append(self.embeddings, self.oov[np.newaxis, :], axis=0)
+    def __init__(self, data_folder: str, embedding_ind: dict, subset: str = "train") -> None:
+        """
+        :param data_folder: Folder where train, test and validation data is present
+        :param embedding_ind: A dictionary mapping each token to its index in the embedding matrix
+        :param subset: Which split, train, test or dev/validation
+        """
+        self.tokens = dict()  # Dictionary containing tokenized sentence per index
+        self.labels = dict()  # Dictionary containing labels per index
+        self.index_emb = embedding_ind  # Dictionary mapping from string token to vocabulary index
 
-        tags = ["SENTIMENT", "CHANGE", "ACTION", "SCENARIO", "POSSESSION"]
+        tags = ["SENTIMENT", "CHANGE", "ACTION", "SCENARIO", "POSSESSION"]  # Set of events
 
         self.target_encoder = LabelEncoder().fit(
             np.array(["O"] + ["B-" + x for x in tags] + ["I-" + x for x in tags]).T
-        )
+        )  # Build encoder to decode/encode labels
 
+        # Open file stream and start reading jsonl
         with open(os.path.join(data_folder, subset) + ".jsonl", "r") as file:
             for line in file:
                 line = json.loads(line)
                 self.tokens[line["idx"]] = line["tokens"]
-                self.labels[line["idx"]] = line["labels"]
+                # ignore label for punctuation (it would be 0)
+                self.labels[line["idx"]] = \
+                    [y for x, y in zip(line['tokens'], line['labels']) if x not in string.punctuation]
+                if not self.labels[line["idx"]]:  # If label list is empty, this is a sentence made up of punctuation
+                    self.labels[line["idx"]] = ['O']  # Just add 0 label in order to allow digesting
 
-        pos_tagged = pos_tag_sents(self.tokens.values())
-        chunked = ne_chunk_sents(pos_tagged)
-        self.chunked = dict(zip(self.tokens.keys(), chunked))
-
-    def sample_builder(self, tree: nltk.Tree) -> tuple[list[np.array], list[int]]:
-        """
-        The method takes care of building the actual embedding samples + a "length mask" which allows tracking the
-        length of multi-token expressions which are embedded by a single vector (since they are named entities). This
-        extra step is useful downstream.
-        :param tree: The Tree class from NLTK containing named entity (binary) tagging.
-        :return: List of embeddings + list of the lengths of the expressions embedded
-        """
-        tree = copy(tree)
-        embeddings_ind = list()
-        len_mask = list()
-        while tree:
-            node = tree.pop(0)
-            if isinstance(node, tuple):
-                len_mask.append(1)
-                if node[1] == "NE":
-                    key = "ENTITY/" + node[1]
-                    try:
-                        embeddings_ind.append(self.index_emb[key])
-                        continue
-                    except KeyError:
-                        pass
-                try:
-                    embeddings_ind.append(self.index_emb[node[1].lower()])
-                except KeyError:
-                    embeddings_ind.append(len(self.embeddings) - 1)
-
-            elif isinstance(node, nltk.Tree) and node.label() == "NE":
-                token_set = [x[0] for x in list(node)]
-                key = "ENTITY/" + "_".join([x for x in list(token_set)])
-                try:
-                    embeddings_ind.append(self.index_emb[key])
-                    len_mask.append(len(node))
-                except KeyError:
-                    for token in token_set:
-                        len_mask.append(1)
-                        try:
-                            embeddings_ind.append(self.index_emb[token.lower()])
-                        except KeyError:
-                            embeddings_ind.append(len(self.embeddings) - 1)
-
-        return self.embeddings[embeddings_ind], len_mask
+        pos_tagged = pos_tag_sents(self.tokens.values())  # Perform POS tagging on sentences
+        chunked = ne_chunk_sents(pos_tagged, binary=True)  # Chunk output of POS tagging for NE recognition
+        self.chunked = dict(zip(self.tokens.keys(), chunked))  # Save output in a dictionary to speed up lookup
 
     def __getitem__(self, item):
         labels = self.target_encoder.transform(self.labels[item])
         tree = self.chunked[item]
-        embeddings, len_mask = self.sample_builder(tree)
+        embeddings, rep_mask, pos_tags = sample_builder(tree, self.index_emb)
 
         grouped_labels = list()
         i = 0
-        for group_len in len_mask:
+        for group_len in rep_mask:
             grouped_labels.append(labels[i])
             i += group_len
 
         return (
-            torch.from_numpy(embeddings),
+            torch.tensor(embeddings, dtype=torch.int32),
             torch.tensor(grouped_labels, dtype=torch.int64),
-            len_mask,
+            rep_mask,
+            torch.tensor(pos_tags, dtype=torch.int32)
         )
 
     def __len__(self):
         return len(self.tokens)
 
 
-def obs_collate(batch):
+def sample_builder(tree: nltk.Tree, index_emb: dict[str:int]) -> tuple[list[np.array], list[int, ...], list[int, ...]]:
+    """
+    The function takes care of building the actual embedding samples + a "rep mask" which allows tracking the
+    length of multi-token expressions which are embedded by a single vector (since they are named entities). This
+    extra step is useful downstream. Additionally, it also outputs integers encoding POS tagging of the tokens.
+    It takes as input the NLTK tree outputted by the named entity chunking.
+    :param tree: The Tree class from NLTK containing named entity (binary) tagging.
+    :param index_emb: The dictionary mapping tokens/entities to vocabulary indexes
+    :return: List of embeddings + list of the lengths of the expressions embedded + list of pos tag integer encoding
+    """
+    tree = copy(tree)  # Avoid side effect on obj by shallow copying
+
+    embeddings_ind = list()  # Initialize list accumulating lists of vocabulary indexes
+    rep_mask = list()  # Initialize list of lists containing the "rep mask" useful to track multi-token entities
+    pos_tags = list()  # Initialize list of lists to store POS tag indexes
+
+    while tree:  # Start NLTK tree parsing
+        node = tree.pop(0)  # Pop starting node of the tree
+        if isinstance(node, tuple):  # If the node is a single token
+            if node[0] in string.punctuation:  # If it is punctuation, ignore and skip iteration
+                continue
+            rep_mask.append(1)  # Add 1 to rep mask to signal that the first embedding is related to a 1 word token
+            try:
+                embeddings_ind.append(index_emb[node[0].lower()])  # Add vocabulary index through dictionary
+            except KeyError:  # If token not found, add out of vocabulary token
+                embeddings_ind.append(len(index_emb))
+            pos_tags.append(tag2int(node[1]))  # Add transformed to int POS tag
+
+        elif isinstance(node, nltk.Tree):  # If the node is another tree, we are dealing with a named entity
+            leaves = list(node)
+            token_set = [x[0].lower() for x in leaves]
+            key = "entity/" + "_".join(token_set)
+            try:
+                embeddings_ind.append(index_emb[key])  # Search for the entity in the dictionary
+                # Possibly more than 1 word for a single embedding, let's keep this into consideration with rep_mask
+                rep_mask.append(len([x for x in token_set if x not in string.punctuation]))
+                pos_tags.append(2)  # A named entity is a name, add related pos tag
+            except KeyError:  # If named entity not found,
+                # revert to parsing the single tokens forming it as std words
+                for i, token in enumerate(token_set):
+                    if token in string.punctuation:  # Difficult to have an entity with punctuation, but just in case
+                        continue
+                    rep_mask.append(1)  # Add 1 to rep mask because the embedding is related to a single token
+                    pos_tags.append(2)  # Add pos tag, each single token is considered as name (since part of a NE)
+                    try:
+                        embeddings_ind.append(index_emb[token.lower()])  # Search embedding for single token
+                    except KeyError:
+                        embeddings_ind.append(len(index_emb))  # Go OOV
+    # It may happen that some sentences are made up only of punctuation --> empty list of indexes
+    if not embeddings_ind:  # 'empty' sentence makes the model crash, consider it as a single OOV token sentence
+        embeddings_ind.append(len(index_emb))
+        rep_mask.append(1)
+        pos_tags.append(5)
+    return embeddings_ind, rep_mask, pos_tags
+
+
+def obs_collate(batch: list[torch.tensor, torch.tensor, list[int], torch.tensor]):
+    """
+    Simple utility function for DataLoader module.
+    """
     embeddings = [obs[0] for obs in batch]
     labels = [obs[1] for obs in batch]
     len_masks = [obs[2] for obs in batch]
+    pos_tags = [obs[3] for obs in batch]
     embeddings = torch.nn.utils.rnn.pack_sequence(embeddings, enforce_sorted=False)
     labels = torch.nn.utils.rnn.pack_sequence(labels, enforce_sorted=False)
-    return embeddings, labels, len_masks
+    pos_tags = torch.nn.utils.rnn.pack_sequence(pos_tags, enforce_sorted=False)
+    return embeddings, labels, len_masks, pos_tags
 
 
-def trainer(
-    model_,
-    epochs: int,
-    learning_r: float,
-    dataloaders: list[DataLoader, DataLoader],
-    torch_device: torch.device,
-):
-    model_.to(torch_device)
-    optimizer = torch.optim.Adam(
-        model_.parameters(), lr=learning_r
-    )  # Adam optimizer initialization
-    loss_history = list()  # Init loss history
-    val_loss = list()  # List of validation losses
-    seq_F1 = list()
-    for _ in (p_bar := tqdm(range(epochs), total=epochs, position=0, leave=True)):
-        for stage in ["train", "valid"]:
-            if stage == "train":
-                batch_acc = 0
-                model_.train()  # Set train mode for model (For Dropout)
-                for x_batch, y_batch, _ in dataloaders[
-                    stage
-                ]:  # get dataloader for specific stage (train or validation)
-                    x_batch, y_batch = x_batch.to(torch_device), y_batch.to(
-                        torch_device
-                    )  # Move to device tensors
-                    y_pred, len_seq = model_(x_batch)  # get pred from model
-                    loss = torch.nn.functional.cross_entropy(
-                        torch.swapaxes(y_pred, 1, 2),
-                        torch.nn.utils.rnn.pad_packed_sequence(
-                            y_batch, batch_first=True, padding_value=12
-                        )[0],
-                        ignore_index=12, weight=torch.tensor([1]*10 + [0.001]).to(torch_device)
-                    )  # compute categorical cross-entropy
-                    loss.backward()  # Call backward propagation on the loss
-                    optimizer.step()  # Move in the parameter space
-                    optimizer.zero_grad()  # set to zero gradients
-                    loss_history.append(loss.item())  # append to loss_history
-                    p_bar.set_postfix({'epoch batch': batch_acc, 'batch loss': loss.item()})
-                    batch_acc += 1
-            else:
-                with torch.no_grad():  # we do not need gradients when calculating validation loss and accuracy
-                    loss_accum = 0  # Initialize to 0 the loss for the single iteration on the validation set
-                    validation_f1 = 0
-                    model_.eval()  # Evaluation mode (for dropout)
-                    for x_batch, y_batch, rep_masks in dataloaders[
-                        stage
-                    ]:  # Access the dataloader for validation
-                        # Move the input tensor to right device
-                        x_batch, y_batch = x_batch.to(torch_device), y_batch.to(torch_device)
-
-                        y_pred, len_seq = model_(
-                            x_batch
-                        )  # Get prediction from validation
-
-                        y_batch = torch.nn.utils.rnn.pad_packed_sequence(
-                            y_batch, batch_first=True, padding_value=12
-                        )[0]
-
-                        # add loss for single batch from validation
-                        loss_accum += torch.nn.functional.cross_entropy(
-                            torch.swapaxes(y_pred, 1, 2), y_batch, ignore_index=12,
-                            weight=torch.tensor([1]*10 + [0.0001]).to(torch_device)
-                        ).item()
-                        y_pred = torch.argmax(y_pred, -1)
-                        y_batch = y_batch.tolist()
-                        y_batch = [
-                            np.repeat(sent[:sent_len], reps).tolist()
-                            for sent, sent_len, reps in zip(y_batch, len_seq, rep_masks)
-                        ]
-                        y_pred = y_pred.tolist()
-                        y_pred = [
-                            np.repeat(sent[:sent_len], reps).tolist()
-                            for sent, sent_len, reps in zip(y_pred, len_seq, rep_masks)
-                        ]
-                        y_batch = [
-                            dataloaders[stage]
-                            .dataset.target_encoder.inverse_transform(
-                                np.array(sent)
-                            )
-                            .tolist()
-                            for sent in y_batch
-                        ]
-                        y_pred = [
-                            dataloaders[stage]
-                            .dataset.target_encoder.inverse_transform(
-                                np.array(sent)
-                            )
-                            .tolist()
-                            for sent in y_pred
-                        ]
-
-                        validation_f1 += f1_score(y_batch, y_pred, mode='strict', scheme=IOB2)
-
-                    # append mean validation loss (mean over the number of batches)
-                    val_loss.append(loss_accum / len(dataloaders[stage]))
-                    seq_F1.append(validation_f1/len(dataloaders[stage]))
-
-        p_bar.set_description(
-            f"MOV TRAIN: {sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train'])} "
-            f"VAL: {val_loss[-1]}; F1_VAL: {seq_F1[-1]}"
-        )
-
-    return model_, loss_history, val_loss
+def tag2int(tag: str) -> int:
+    """
+    Simple utility function to map from Penn Treebank POS Tags to an integer encoding.
+    :param tag: The tag
+    :return: The integer encoding of the tag
+    """
+    if tag.startswith('V'):
+        return 1
+    elif tag.startswith('N'):
+        return 2
+    elif tag.startswith('J'):
+        return 3
+    elif tag.startswith('RB'):
+        return 4
+    else:
+        return 5
 
 
-if __name__ == "__main__":
-    import time
 
-    training_data = ModelData(
-        "../../../data",
-        load_embeddings(os.path.join("../../../model", "embeddings.txt")),
-    )
-    train_dataloader = DataLoader(
-        training_data, batch_size=64, shuffle=True, collate_fn=obs_collate
-    )
-    iterator = iter(train_dataloader)
-    start = time.time()
-    next(iterator)
-    print(time.time() - start)
