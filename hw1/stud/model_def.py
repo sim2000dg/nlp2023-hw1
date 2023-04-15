@@ -141,8 +141,7 @@ class BiLSTMClassifier(torch.nn.Module):
                             torch.swapaxes(y_pred, 1, 2),
                             y_batch,
                             ignore_index=12,
-                            weight=torch.tensor([1] * 10 + [0.01]).to(torch_device),
-                        )  # compute categorical cross-entropy (scaling it to account for wild class imbalance)
+                        )  # compute categorical cross-entropy
 
                         loss.backward()  # Call backward propagation on the loss
                         optimizer.step()  # Move in the parameter space
@@ -180,7 +179,6 @@ class BiLSTMClassifier(torch.nn.Module):
                                 torch.swapaxes(y_pred, 1, 2),
                                 y_batch,
                                 ignore_index=12,
-                                weight=torch.tensor([1] * 10 + [0.01]).to(torch_device),
                             ).item()
 
                             y_pred = torch.argmax(y_pred, -1)  # Get actual prediction
