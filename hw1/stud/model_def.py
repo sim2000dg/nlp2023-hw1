@@ -117,6 +117,17 @@ class BiLSTMClassifier(torch.nn.Module):
         val_loss = list()  # List of validation losses
         seq_F1 = list()  # Init sequence of F1 validation scores
 
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            "max",
+            patience=5,
+            threshold=0.01,
+            threshold_mode="abs",
+            cooldown=1,
+            min_lr=1e-5,
+            verbose=True,
+        )  # Scheduler to check lr w.r.t. F1 score
+
         for _ in (p_bar := tqdm(range(epochs), total=epochs, position=0, leave=True)):
             for stage in ["train", "valid"]:
                 if stage == "train":
@@ -227,14 +238,22 @@ class BiLSTMClassifier(torch.nn.Module):
                             ]
                             # Finally, compute f1_score with seqeval
                             validation_f1 += f1_score(
-                                y_batch, y_pred, mode="strict", average='macro', scheme=IOB2
+                                y_batch,
+                                y_pred,
+                                mode="strict",
+                                average="macro",
+                                scheme=IOB2,
                             )
 
                         # append mean validation loss (mean over the number of batches)
                         val_loss.append(loss_accum / len(dataloaders[stage]))
                         seq_F1.append(validation_f1 / len(dataloaders[stage]))
 
-            if seq_F1[-1] > max(seq_F1, default=0):  # If last F1 score better than any previous one
+                        scheduler.step(seq_F1[-1])  # LR Scheduler step with current F1 score
+
+            if seq_F1[-1] > max(
+                seq_F1, default=0
+            ):  # If last F1 score better than any previous one
                 best_model = self.state_dict()  # reference to model weights
                 if torch_device == torch.device("cpu"):
                     best_model = deepcopy(best_model)
@@ -258,24 +277,30 @@ class BiLSTMClassifier(torch.nn.Module):
         return best_model, loss_history, val_loss, seq_F1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from utilities import ModelData, obs_collate, load_embeddings
     import os
     import numpy as np
 
     device = torch.device(
-        'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
+        "mps"
+        if torch.backends.mps.is_available()
+        else "cuda"
+        if torch.cuda.is_available()
+        else "cpu"
+    )
 
-    embeddings, embedding_ind = load_embeddings(os.path.join("../../model", "embeddings.txt"))
+    embeddings, embedding_ind = load_embeddings(
+        os.path.join("../../model", "embeddings.txt")
+    )
 
     training_data = ModelData("../../data", embedding_ind)
-    val_data = ModelData("../../data", embedding_ind, 'dev')
-    train_dataloader = DataLoader(training_data, batch_size=128,
-                                  shuffle=True, collate_fn=obs_collate)
-    val_dataloader = DataLoader(val_data, batch_size=500,
-                                collate_fn=obs_collate)
-    dataloaders = {'train': train_dataloader,
-                   'valid': val_dataloader}
+    val_data = ModelData("../../data", embedding_ind, "dev")
+    train_dataloader = DataLoader(
+        training_data, batch_size=128, shuffle=True, collate_fn=obs_collate
+    )
+    val_dataloader = DataLoader(val_data, batch_size=500, collate_fn=obs_collate)
+    dataloaders = {"train": train_dataloader, "valid": val_dataloader}
 
-    model = BiLSTMClassifier(embeddings, 'LSTM', 100, 2, 5, 0)
-    model.fit(20, 1e-3, 1e-4, dataloaders, torch.device('cpu'))
+    model = BiLSTMClassifier(embeddings, "LSTM", 100, 2, 5, 0)
+    model.fit(20, 1e-3, 1e-4, dataloaders, torch.device("cpu"))
