@@ -233,6 +233,7 @@ class BiLSTMClassifier(torch.nn.Module):
                     best_model = deepcopy(
                         self.state_dict()
                     )  # Save deep reference to best model weights
+                    best_model = [tensor.to(torch.device('cpu')) for tensor in best_model.values()]
             else:
                 best_model = None
             p_bar.set_description(
