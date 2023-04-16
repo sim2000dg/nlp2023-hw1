@@ -245,14 +245,16 @@ class BiLSTMClassifier(torch.nn.Module):
                                 scheme=IOB2,
                             )
 
-                        # append mean validation loss (mean over the number of batches)
-                        val_loss.append(loss_accum / len(dataloaders[stage]))
-                        seq_F1.append(validation_f1 / len(dataloaders[stage]))
+            # append mean validation loss (mean over the number of batches)
+            val_loss.append(loss_accum / len(dataloaders[stage]))
+            seq_F1.append(validation_f1 / len(dataloaders[stage]))
 
-                        scheduler.step(seq_F1[-1])  # LR Scheduler step with current F1 score
+            scheduler.step(
+                seq_F1[-1]
+            )  # LR Scheduler step with current F1 score
 
             if seq_F1[-1] > max(
-                seq_F1, default=0
+                seq_F1[:-1], default=0
             ):  # If last F1 score better than any previous one
                 best_model = self.state_dict()  # reference to model weights
                 if torch_device == torch.device("cpu"):
