@@ -234,8 +234,8 @@ class BiLSTMClassifier(torch.nn.Module):
                         val_loss.append(loss_accum / len(dataloaders[stage]))
                         seq_F1.append(validation_f1 / len(dataloaders[stage]))
 
-            if len(val_loss) > 3:
-                if val_loss[-1] > np.mean(val_loss[-3:]):
+            if val_loss:
+                if val_loss[-1] > max(val_loss):
                     best_model = self.state_dict()  # reference to model weights
                     if torch_device == torch.device("cpu"):
                         best_model = deepcopy(best_model)
