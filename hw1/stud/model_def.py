@@ -237,7 +237,7 @@ class BiLSTMClassifier(torch.nn.Module):
             if len(val_loss) > 3:
                 if val_loss[-1] > np.mean(val_loss[-3:]):
                     best_model = self.state_dict()  # reference to model weights
-                    if device == torch.device("cpu"):
+                    if torch_device == torch.device("cpu"):
                         best_model = deepcopy(best_model)
                     else:
                         best_model = dict(  # Building a dict with keys referring state tensors on CPU memory
