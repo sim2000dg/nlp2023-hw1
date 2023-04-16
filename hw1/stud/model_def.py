@@ -234,25 +234,22 @@ class BiLSTMClassifier(torch.nn.Module):
                         val_loss.append(loss_accum / len(dataloaders[stage]))
                         seq_F1.append(validation_f1 / len(dataloaders[stage]))
 
-            if val_loss:
-                if val_loss[-1] > max(val_loss):
-                    best_model = self.state_dict()  # reference to model weights
-                    if torch_device == torch.device("cpu"):
-                        best_model = deepcopy(best_model)
-                    else:
-                        best_model = dict(  # Building a dict with keys referring state tensors on CPU memory
-                            zip(
-                                best_model.keys(),
-                                [
-                                    tensor.to(
-                                        torch.device("cpu")
-                                    )  # copy of state tensors to CPU memory
-                                    for tensor in best_model.values()
-                                ],
-                            )
+            if seq_F1[-1] > max(seq_F1, default=0):  # If last F1 score better than any previous one
+                best_model = self.state_dict()  # reference to model weights
+                if torch_device == torch.device("cpu"):
+                    best_model = deepcopy(best_model)
+                else:
+                    best_model = dict(  # Building a dict with keys referring state tensors on CPU memory
+                        zip(
+                            best_model.keys(),
+                            [
+                                tensor.to(
+                                    torch.device("cpu")
+                                )  # copy of state tensors to CPU memory
+                                for tensor in best_model.values()
+                            ],
                         )
-            else:
-                best_model = None
+                    )
             p_bar.set_description(
                 f"MOV TRAIN: {sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train'])} "
                 f"VAL: {val_loss[-1]}; F1_VAL: {seq_F1[-1]}"
