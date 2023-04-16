@@ -227,7 +227,7 @@ class BiLSTMClassifier(torch.nn.Module):
                             ]
                             # Finally, compute f1_score with seqeval
                             validation_f1 += f1_score(
-                                y_batch, y_pred, mode="strict", scheme=IOB2
+                                y_batch, y_pred, mode="strict", average='macro', scheme=IOB2
                             )
 
                         # append mean validation loss (mean over the number of batches)
