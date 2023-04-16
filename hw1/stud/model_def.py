@@ -136,7 +136,10 @@ class BiLSTMClassifier(torch.nn.Module):
                             [x_batch, pos_tags]
                         )  # get predictions from model
                         y_batch = torch.nn.utils.rnn.pad_packed_sequence(
-                            y_batch, batch_first=True, padding_value=12)[0]  # Pad ground truth
+                            y_batch, batch_first=True, padding_value=12
+                        )[
+                            0
+                        ]  # Pad ground truth
                         loss = torch.nn.functional.cross_entropy(
                             torch.swapaxes(y_pred, 1, 2),
                             y_batch,
@@ -173,7 +176,10 @@ class BiLSTMClassifier(torch.nn.Module):
                                 [x_batch, pos_tags]
                             )  # Get prediction from validation
                             y_batch = torch.nn.utils.rnn.pad_packed_sequence(
-                                y_batch, batch_first=True, padding_value=12)[0]  # Ground truth
+                                y_batch, batch_first=True, padding_value=12
+                            )[
+                                0
+                            ]  # Ground truth
                             # add to accumulator loss for single batch from validation
                             loss_accum += torch.nn.functional.cross_entropy(
                                 torch.swapaxes(y_pred, 1, 2),
@@ -230,10 +236,16 @@ class BiLSTMClassifier(torch.nn.Module):
 
             if len(val_loss) > 3:
                 if val_loss[-1] > np.mean(val_loss[-3:]):
-                    best_model = deepcopy(
-                        self.state_dict()
-                    )  # Save deep reference to best model weights
-                    best_model = [tensor.to(torch.device('cpu')) for tensor in best_model.values()]
+                    best_model = self.state_dict()  # reference to model weights
+                    best_model = dict(    # Building a dict with keys referring state tensors on CPU memory
+                        zip(
+                            best_model.keys(),
+                            [
+                                tensor.to(torch.device("cpu"))  # copy of state tensors to CPU memory
+                                for tensor in best_model.values()
+                            ],
+                        )
+                    )
             else:
                 best_model = None
             p_bar.set_description(
