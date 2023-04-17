@@ -264,6 +264,7 @@ class BiLSTMClassifier(torch.nn.Module):
                                 mode="strict",
                                 average="macro",
                                 scheme=IOB2,
+                                zero_division=0
                             )  # Compute precision
 
             # append mean validation loss (mean over the number of batches)
@@ -293,7 +294,7 @@ class BiLSTMClassifier(torch.nn.Module):
             p_bar.set_description(
                 f"MOV TRAIN: {round(sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train']), 2)}; "
                 f"VAL: {round(val_loss[-1], 2)}; REC_VAL: {round(recall_accum / len(dataloaders[stage]), 2)}; "
-                f"PREC_VAL:{round(recall_accum / len(dataloaders[stage]), 2)}; F1_VAL: {round(seq_F1[-1], 3)}"
+                f"PREC_VAL:{round(precision_accum / len(dataloaders[stage]), 2)}; F1_VAL: {round(seq_F1[-1], 3)}"
             )  # Update tqdm bar description with end-of-epoch values
 
         return best_model, loss_history, val_loss, seq_F1
