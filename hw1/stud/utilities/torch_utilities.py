@@ -13,11 +13,13 @@ import os
 
 nltk.download("maxent_ne_chunker")
 nltk.download("words")
-nltk.download('averaged_perceptron_tagger')
+nltk.download("averaged_perceptron_tagger")
 
 
 class ModelData(Dataset):
-    def __init__(self, data_folder: str, embedding_ind: dict, subset: str = "train") -> None:
+    def __init__(
+        self, data_folder: str, embedding_ind: dict, subset: str = "train"
+    ) -> None:
         """
         :param data_folder: Folder where train, test and validation data is present
         :param embedding_ind: A dictionary mapping each token to its index in the embedding matrix
@@ -25,9 +27,17 @@ class ModelData(Dataset):
         """
         self.tokens = dict()  # Dictionary containing tokenized sentence per index
         self.labels = dict()  # Dictionary containing labels per index
-        self.index_emb = embedding_ind  # Dictionary mapping from string token to vocabulary index
+        self.index_emb = (
+            embedding_ind  # Dictionary mapping from string token to vocabulary index
+        )
 
-        tags = ["SENTIMENT", "CHANGE", "ACTION", "SCENARIO", "POSSESSION"]  # Set of events
+        tags = [
+            "SENTIMENT",
+            "CHANGE",
+            "ACTION",
+            "SCENARIO",
+            "POSSESSION",
+        ]  # Set of events
 
         self.target_encoder = LabelEncoder().fit(
             np.array(["O"] + ["B-" + x for x in tags] + ["I-" + x for x in tags]).T
@@ -39,14 +49,27 @@ class ModelData(Dataset):
                 line = json.loads(line)
                 self.tokens[line["idx"]] = line["tokens"]
                 # ignore label for punctuation (it would be 0)
-                self.labels[line["idx"]] = \
-                    [y for x, y in zip(line['tokens'], line['labels']) if x not in string.punctuation]
-                if not self.labels[line["idx"]]:  # If label list is empty, this is a sentence made up of punctuation
-                    self.labels[line["idx"]] = ['O']  # Just add 0 label in order to allow digesting
+                self.labels[line["idx"]] = [
+                    y
+                    for x, y in zip(line["tokens"], line["labels"])
+                    if x not in string.punctuation
+                ]
+                if not self.labels[
+                    line["idx"]
+                ]:  # If label list is empty, this is a sentence made up of punctuation
+                    self.labels[line["idx"]] = [
+                        "O"
+                    ]  # Just add 0 label in order to allow digesting
 
-        pos_tagged = pos_tag_sents(self.tokens.values())  # Perform POS tagging on sentences
-        chunked = ne_chunk_sents(pos_tagged, binary=True)  # Chunk output of POS tagging for NE recognition
-        self.chunked = dict(zip(self.tokens.keys(), chunked))  # Save output in a dictionary to speed up lookup
+        pos_tagged = pos_tag_sents(
+            self.tokens.values()
+        )  # Perform POS tagging on sentences
+        chunked = ne_chunk_sents(
+            pos_tagged, binary=True
+        )  # Chunk output of POS tagging for NE recognition
+        self.chunked = dict(
+            zip(self.tokens.keys(), chunked)
+        )  # Save output in a dictionary to speed up lookup
 
     def __getitem__(self, item):
         labels = self.target_encoder.transform(self.labels[item])
@@ -66,14 +89,16 @@ class ModelData(Dataset):
             torch.tensor(grouped_labels, dtype=torch.int64),
             rep_mask,
             torch.tensor(pos_tags, dtype=torch.int32),
-            torch.tensor(labels, dtype=torch.int32)
+            labels,
         )
 
     def __len__(self):
         return len(self.tokens)
 
 
-def sample_builder(tree: nltk.Tree, index_emb: dict[str:int]) -> tuple[list[np.array], list[int, ...], list[int, ...]]:
+def sample_builder(
+    tree: nltk.Tree, index_emb: dict[str:int]
+) -> tuple[list[np.array], list[int, ...], list[int, ...]]:
     """
     The function takes care of building the actual embedding samples + a "rep mask" which allows tracking the
     length of multi-token expressions which are embedded by a single vector (since they are named entities). This
@@ -86,43 +111,67 @@ def sample_builder(tree: nltk.Tree, index_emb: dict[str:int]) -> tuple[list[np.a
     tree = copy(tree)  # Avoid side effect on obj by shallow copying
 
     embeddings_ind = list()  # Initialize list accumulating lists of vocabulary indexes
-    rep_mask = list()  # Initialize list of lists containing the "rep mask" useful to track multi-token entities
+    rep_mask = (
+        list()
+    )  # Initialize list of lists containing the "rep mask" useful to track multi-token entities
     pos_tags = list()  # Initialize list of lists to store POS tag indexes
 
     while tree:  # Start NLTK tree parsing
         node = tree.pop(0)  # Pop starting node of the tree
         if isinstance(node, tuple):  # If the node is a single token
-            if node[0] in string.punctuation:  # If it is punctuation, ignore and skip iteration
+            if (
+                node[0] in string.punctuation
+            ):  # If it is punctuation, ignore and skip iteration
                 continue
-            rep_mask.append(1)  # Add 1 to rep mask to signal that the first embedding is related to a 1 word token
+            rep_mask.append(
+                1
+            )  # Add 1 to rep mask to signal that the first embedding is related to a 1 word token
             try:
-                embeddings_ind.append(index_emb[node[0].lower()])  # Add vocabulary index through dictionary
+                embeddings_ind.append(
+                    index_emb[node[0].lower()]
+                )  # Add vocabulary index through dictionary
             except KeyError:  # If token not found, add out of vocabulary token
                 embeddings_ind.append(len(index_emb))
             pos_tags.append(tag2int(node[1]))  # Add transformed to int POS tag
 
-        elif isinstance(node, nltk.Tree):  # If the node is another tree, we are dealing with a named entity
+        elif isinstance(
+            node, nltk.Tree
+        ):  # If the node is another tree, we are dealing with a named entity
             leaves = list(node)
             token_set = [x[0].lower() for x in leaves]
             key = "entity/" + "_".join(token_set)
             try:
-                embeddings_ind.append(index_emb[key])  # Search for the entity in the dictionary
+                embeddings_ind.append(
+                    index_emb[key]
+                )  # Search for the entity in the dictionary
                 # Possibly more than 1 word for a single embedding, let's keep this into consideration with rep_mask
-                rep_mask.append(len([x for x in token_set if x not in string.punctuation]))
+                rep_mask.append(
+                    len([x for x in token_set if x not in string.punctuation])
+                )
                 pos_tags.append(2)  # A named entity is a name, add related pos tag
             except KeyError:  # If named entity not found,
                 # revert to parsing the single tokens forming it as std words
                 for i, token in enumerate(token_set):
-                    if token in string.punctuation:  # Difficult to have an entity with punctuation, but just in case
+                    if (
+                        token in string.punctuation
+                    ):  # Remove punctuation in entity
                         continue
-                    rep_mask.append(1)  # Add 1 to rep mask because the embedding is related to a single token
-                    pos_tags.append(2)  # Add pos tag, each single token is considered as name (since part of a NE)
+                    rep_mask.append(
+                        1
+                    )  # Add 1 to rep mask because the embedding is related to a single token
+                    pos_tags.append(
+                        2
+                    )  # Add pos tag, each single token is considered as name (since part of a NE)
                     try:
-                        embeddings_ind.append(index_emb[token.lower()])  # Search embedding for single token
+                        embeddings_ind.append(
+                            index_emb[token.lower()]
+                        )  # Search embedding for single token
                     except KeyError:
                         embeddings_ind.append(len(index_emb))  # Go OOV
     # It may happen that some sentences are made up only of punctuation --> empty list of indexes
-    if not embeddings_ind:  # 'empty' sentence makes the model crash, consider it as a single OOV token sentence
+    if (
+        not embeddings_ind
+    ):  # 'empty' sentence makes the model crash, consider it as a single OOV token sentence
         embeddings_ind.append(len(index_emb))
         rep_mask.append(1)
         pos_tags.append(5)
@@ -141,7 +190,7 @@ def obs_collate(batch: list[torch.tensor, torch.tensor, list[int], torch.tensor]
     embeddings = torch.nn.utils.rnn.pack_sequence(embeddings, enforce_sorted=False)
     labels = torch.nn.utils.rnn.pack_sequence(labels, enforce_sorted=False)
     pos_tags = torch.nn.utils.rnn.pack_sequence(pos_tags, enforce_sorted=False)
-    complete_labels = torch.nn.utils.rnn.pack_sequence(complete_labels, enforce_sorted=False)
+
     return embeddings, labels, rep_masks, pos_tags, complete_labels
 
 
@@ -151,16 +200,13 @@ def tag2int(tag: str) -> int:
     :param tag: The tag
     :return: The integer encoding of the tag
     """
-    if tag.startswith('V'):
+    if tag.startswith("V"):
         return 1
-    elif tag.startswith('N'):
+    elif tag.startswith("N"):
         return 2
-    elif tag.startswith('J'):
+    elif tag.startswith("J"):
         return 3
-    elif tag.startswith('RB'):
+    elif tag.startswith("RB"):
         return 4
     else:
         return 5
-
-
-

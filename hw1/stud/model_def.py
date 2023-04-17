@@ -176,8 +176,8 @@ class BiLSTMClassifier(torch.nn.Module):
                         for (
                             x_batch,  # input embeddings
                             y_batch,  # ground truth grouped
-                            rep_masks,  # rep masks to move from disentangle grouped predictions
-                            pos_tags,   # input pos tag integers
+                            rep_masks,  # rep masks to use for disentangling grouped predictions
+                            pos_tags,  # input pos tag integers
                             c_y_batch,  # original ground truth (complete ground truth, that's the c)
                         ) in dataloaders[
                             stage
@@ -197,7 +197,7 @@ class BiLSTMClassifier(torch.nn.Module):
                             )[
                                 0
                             ]  # Ground truth for training
-                            # add to accumulator loss for single batch from validation
+                            # Add to accumulator loss for single batch from validation
                             loss_accum += torch.nn.functional.cross_entropy(
                                 torch.swapaxes(y_pred, 1, 2),
                                 y_batch,
@@ -205,17 +205,6 @@ class BiLSTMClassifier(torch.nn.Module):
                             ).item()
 
                             y_pred = torch.argmax(y_pred, -1)  # Get actual prediction
-
-                            # Pad packed complete ground truth
-                            (
-                                c_y_batch,
-                                len_seq_complete,  # Length of the overall sentence (not grouped)
-                            ) = torch.nn.utils.rnn.pad_packed_sequence(
-                                c_y_batch, batch_first=True
-                            )  # Ground padding truth, moving from packed to normal tensor
-                            c_y_batch = (
-                                c_y_batch.tolist()
-                            )  # Turn padded complete ground truth into a list
                             y_pred = (
                                 y_pred.tolist()
                             )  # Turn padded predictions into a list
@@ -227,15 +216,7 @@ class BiLSTMClassifier(torch.nn.Module):
                                     y_pred, len_seq, rep_masks
                                 )
                             ]
-                            # Decode complete c_y_batch/complete gr. truth (+ remove its padding) and decode predictions
-                            c_y_batch = [
-                                dataloaders[stage]
-                                .dataset.target_encoder.inverse_transform(
-                                    np.array(labs[:sent_len])
-                                )
-                                .tolist()
-                                for labs, sent_len in zip(c_y_batch, len_seq_complete)
-                            ]
+                            # Decode predictions and ground truth with label encoder
                             y_pred = [
                                 dataloaders[stage]
                                 .dataset.target_encoder.inverse_transform(
@@ -244,6 +225,16 @@ class BiLSTMClassifier(torch.nn.Module):
                                 .tolist()
                                 for labs in y_pred
                             ]
+
+                            c_y_batch = [
+                                dataloaders[stage]
+                                .dataset.target_encoder.inverse_transform(
+                                    np.array(labs)
+                                )
+                                .tolist()
+                                for labs in c_y_batch
+                            ]
+
                             # Finally, compute f1_score with seqeval
                             validation_f1 += f1_score(
                                 c_y_batch,
