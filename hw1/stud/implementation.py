@@ -1,7 +1,26 @@
+import string
+
 import numpy as np
 from typing import List
 
 from model import Model
+from model_def import BiLSTMClassifier
+from utilities import load_embeddings, sample_builder
+import torch
+import nltk
+
+
+nltk.download("maxent_ne_chunker")
+nltk.download("words")
+nltk.download('averaged_perceptron_tagger')
+
+from nltk.tag import _get_tagger, _pos_tag
+from nltk.data import load
+from nltk.chunk import _BINARY_NE_CHUNKER
+
+eng_tagger = _get_tagger('eng')
+ne_chunker = load(_BINARY_NE_CHUNKER)
+
 
 
 def build_model(device: str) -> Model:
@@ -37,12 +56,28 @@ class RandomBaseline(Model):
         ]
 
 
-class StudentModel(Model):
-
-    # STUDENT: construct here your model
-    # this class should be loading your weights and vocabulary
+class StudentModel(Model, BiLSTMClassifier):
+    def __init__(self):
+        embedding_matrix, self.token_dict = load_embeddings('../../model/embeddings.txt')
+        BiLSTMClassifier.__init__(StudentModel, embedding_matrix, 'LSTM', 200, 1, 3, 0)
+        self.load_state_dict(torch.load('../../model/trained_weights.pth'))
 
     def predict(self, tokens: List[List[str]]) -> List[List[str]]:
-        # STUDENT: implement here your predict function
-        # remember to respect the same order of tokens!
-        pass
+        tokens = tokens[0]
+        punct_index = [i for i, x in enumerate(tokens) if i not in string.punctuation]
+        pos_tagged = _pos_tag(tokens, None, eng_tagger, 'eng')
+        ne_chunked = ne_chunker(pos_tagged)
+        emb_ind, rep_mask, pos_tags = sample_builder(ne_chunked, self.token_dict)
+        emb_ind = torch.nn.utils.rnn.pack_sequence(torch.tensor(emb_ind, dtype=torch.int32))
+        pos_tags = torch.nn.utils.rnn.pack_sequence(torch.torch.tensor(pos_tags, dtype=torch.int32))
+        preds, len_seq = self([emb_ind, pos_tags])
+        preds = torch.nn.utils.rnn.pad_packed_sequence(preds, batch_first=True)
+        preds = torch.squeeze(preds, 0)
+        preds = torch.argmax(preds, -1)
+        y_pred = np.repeat(preds, rep_mask).tolist()
+        for i in punct_index:
+            y_pred[i] = 'O'
+
+        return [y_pred]
+
+

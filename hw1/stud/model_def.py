@@ -100,7 +100,7 @@ class BiLSTMClassifier(torch.nn.Module):
         torch_device: torch.device,
     ) -> tuple[dict, list[float, ...], list[float, ...], list[float, ...]]:
         """
-        Training routine.
+        Training and validation routine.
         :param epochs: number of epochs.
         :param learning_r: learning rate for Adam optimizer.
         :param l2_regularization: L2 regularization factor (or weight decay).

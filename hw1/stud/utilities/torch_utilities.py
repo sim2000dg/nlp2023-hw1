@@ -135,14 +135,14 @@ def obs_collate(batch: list[torch.tensor, torch.tensor, list[int], torch.tensor]
     """
     embeddings = [obs[0] for obs in batch]
     labels = [obs[1] for obs in batch]
-    len_masks = [obs[2] for obs in batch]
+    rep_masks = [obs[2] for obs in batch]
     pos_tags = [obs[3] for obs in batch]
     complete_labels = [obs[4] for obs in batch]
     embeddings = torch.nn.utils.rnn.pack_sequence(embeddings, enforce_sorted=False)
     labels = torch.nn.utils.rnn.pack_sequence(labels, enforce_sorted=False)
     pos_tags = torch.nn.utils.rnn.pack_sequence(pos_tags, enforce_sorted=False)
     complete_labels = torch.nn.utils.rnn.pack_sequence(complete_labels, enforce_sorted=False)
-    return embeddings, labels, len_masks, pos_tags, complete_labels
+    return embeddings, labels, rep_masks, pos_tags, complete_labels
 
 
 def tag2int(tag: str) -> int:
