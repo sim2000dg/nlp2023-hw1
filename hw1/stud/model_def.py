@@ -117,16 +117,16 @@ class BiLSTMClassifier(torch.nn.Module):
         val_loss = list()  # List of validation losses
         seq_F1 = list()  # Init sequence of F1 validation scores
 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            "max",
-            patience=5,
-            threshold=0.01,
-            threshold_mode="abs",
-            cooldown=1,
-            min_lr=1e-4,
-            verbose=True,
-        )  # Scheduler to check lr w.r.t. F1 score
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #     optimizer,
+        #     "max",
+        #     patience=5,
+        #     threshold=0.01,
+        #     threshold_mode="abs",
+        #     cooldown=1,
+        #     min_lr=1e-4,
+        #     verbose=True,
+        # )  # Scheduler to check lr w.r.t. F1 score
 
         for _ in (p_bar := tqdm(range(epochs), total=epochs, position=0, leave=True)):
             for stage in ["train", "valid"]:
@@ -257,7 +257,7 @@ class BiLSTMClassifier(torch.nn.Module):
             val_loss.append(loss_accum / len(dataloaders[stage]))
             seq_F1.append(validation_f1 / len(dataloaders[stage]))
 
-            scheduler.step(seq_F1[-1])  # LR Scheduler step with current F1 score
+            # scheduler.step(seq_F1[-1])  # LR Scheduler step with current F1 score
 
             if seq_F1[-1] > max(
                 seq_F1[:-1], default=0
@@ -278,8 +278,8 @@ class BiLSTMClassifier(torch.nn.Module):
                         )
                     )
             p_bar.set_description(
-                f"MOV TRAIN: {sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train'])} "
-                f"VAL: {val_loss[-1]}; F1_VAL: {seq_F1[-1]}"
+                f"MOV TRAIN: {round(sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train']), 2)} "
+                f"VAL: {round(val_loss[-1], 2)}; F1_VAL: {round(seq_F1[-1], 3)}"
             )  # Update tqdm bar description with end-of-epoch values
 
         return best_model, loss_history, val_loss, seq_F1
