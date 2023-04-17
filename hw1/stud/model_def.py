@@ -124,7 +124,7 @@ class BiLSTMClassifier(torch.nn.Module):
             threshold=0.01,
             threshold_mode="abs",
             cooldown=1,
-            min_lr=1e-5,
+            min_lr=1e-4,
             verbose=True,
         )  # Scheduler to check lr w.r.t. F1 score
 
