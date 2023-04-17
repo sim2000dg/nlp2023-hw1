@@ -1,6 +1,6 @@
 import torch
 from tqdm import tqdm
-from seqeval.metrics import f1_score, accuracy_score
+from seqeval.metrics import f1_score, recall_score, precision_score
 from seqeval.scheme import IOB2
 from torch.utils.data import DataLoader
 import numpy as np
@@ -172,8 +172,11 @@ class BiLSTMClassifier(torch.nn.Module):
                     with torch.no_grad():  # we do not need gradients when calculating validation loss and accuracy
                         loss_accum = 0  # initialize accumulator of validation loss
                         validation_f1 = 0  # initialize accumulator of validation F1
-                        accuracy_accum = (
+                        recall_accum = (
                             0  # Initialize accumulator of accuracy on validation
+                        )
+                        precision_accum = (
+                            0  # Initialize accumulator of precision on validation
                         )
                         self.eval()  # Evaluation mode (deactivating dropout if present)
                         for (
@@ -247,7 +250,21 @@ class BiLSTMClassifier(torch.nn.Module):
                                 scheme=IOB2,
                             )
 
-                            accuracy_accum += accuracy_score(c_y_batch, y_pred)  # Compute accuracy
+                            recall_accum += recall_score(
+                                c_y_batch,
+                                y_pred,
+                                mode="strict",
+                                average="macro",
+                                scheme=IOB2,
+                            )  # Compute recall
+
+                            precision_accum += precision_score(
+                                c_y_batch,
+                                y_pred,
+                                mode="strict",
+                                average="macro",
+                                scheme=IOB2,
+                            )  # Compute precision
 
             # append mean validation loss (mean over the number of batches)
             val_loss.append(loss_accum / len(dataloaders[stage]))
@@ -275,8 +292,8 @@ class BiLSTMClassifier(torch.nn.Module):
                     )
             p_bar.set_description(
                 f"MOV TRAIN: {round(sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train']), 2)}; "
-                f"VAL: {round(val_loss[-1], 2)}; ACC_VAL: {round(accuracy_accum/len(dataloaders[stage]), 2)}; "
-                f"F1_VAL: {round(seq_F1[-1], 3)}"
+                f"VAL: {round(val_loss[-1], 2)}; REC_VAL: {round(recall_accum / len(dataloaders[stage]), 2)}; "
+                f"PREC_VAL:{round(recall_accum / len(dataloaders[stage]), 2)}; F1_VAL: {round(seq_F1[-1], 3)}"
             )  # Update tqdm bar description with end-of-epoch values
 
         return best_model, loss_history, val_loss, seq_F1
