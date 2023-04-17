@@ -275,7 +275,7 @@ class BiLSTMClassifier(torch.nn.Module):
                     )
             p_bar.set_description(
                 f"MOV TRAIN: {round(sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train']), 2)}; "
-                f"VAL: {round(val_loss[-1], 2)}; ACC_VAL: {round(accuracy_accum/len(dataloaders[stage]))}; "
+                f"VAL: {round(val_loss[-1], 2)}; ACC_VAL: {round(accuracy_accum/len(dataloaders[stage]), 2)}; "
                 f"F1_VAL: {round(seq_F1[-1], 3)}"
             )  # Update tqdm bar description with end-of-epoch values
 
