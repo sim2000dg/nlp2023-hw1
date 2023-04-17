@@ -1,6 +1,6 @@
 import torch
 from tqdm import tqdm
-from seqeval.metrics import f1_score
+from seqeval.metrics import f1_score, accuracy_score
 from seqeval.scheme import IOB2
 from torch.utils.data import DataLoader
 import numpy as np
@@ -172,6 +172,9 @@ class BiLSTMClassifier(torch.nn.Module):
                     with torch.no_grad():  # we do not need gradients when calculating validation loss and accuracy
                         loss_accum = 0  # initialize accumulator of validation loss
                         validation_f1 = 0  # initialize accumulator of validation F1
+                        accuracy_accum = (
+                            0  # Initialize accumulator of accuracy on validation
+                        )
                         self.eval()  # Evaluation mode (deactivating dropout if present)
                         for (
                             x_batch,  # input embeddings
@@ -244,6 +247,8 @@ class BiLSTMClassifier(torch.nn.Module):
                                 scheme=IOB2,
                             )
 
+                            accuracy_accum += accuracy_score(c_y_batch, y_pred)  # Compute accuracy
+
             # append mean validation loss (mean over the number of batches)
             val_loss.append(loss_accum / len(dataloaders[stage]))
             seq_F1.append(validation_f1 / len(dataloaders[stage]))
@@ -269,8 +274,9 @@ class BiLSTMClassifier(torch.nn.Module):
                         )
                     )
             p_bar.set_description(
-                f"MOV TRAIN: {round(sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train']), 2)} "
-                f"VAL: {round(val_loss[-1], 2)}; F1_VAL: {round(seq_F1[-1], 3)}"
+                f"MOV TRAIN: {round(sum(loss_history[-len(dataloaders['train']):]) / len(dataloaders['train']), 2)}; "
+                f"VAL: {round(val_loss[-1], 2)}; ACC_VAL: {round(accuracy_accum/len(dataloaders[stage]))}; "
+                f"F1_VAL: {round(seq_F1[-1], 3)}"
             )  # Update tqdm bar description with end-of-epoch values
 
         return best_model, loss_history, val_loss, seq_F1
