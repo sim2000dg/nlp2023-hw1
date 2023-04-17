@@ -59,11 +59,14 @@ class ModelData(Dataset):
             grouped_labels.append(labels[i])
             i += group_len
 
+        # Return "grouped" labels (1 response for grouped tokens) and
+        # "complete" labels (original labels, to ensure fair F1 in test/val)
         return (
             torch.tensor(embeddings, dtype=torch.int32),
             torch.tensor(grouped_labels, dtype=torch.int64),
             rep_mask,
-            torch.tensor(pos_tags, dtype=torch.int32)
+            torch.tensor(pos_tags, dtype=torch.int32),
+            torch.tensor(labels, dtype=torch.int32)
         )
 
     def __len__(self):
@@ -134,10 +137,12 @@ def obs_collate(batch: list[torch.tensor, torch.tensor, list[int], torch.tensor]
     labels = [obs[1] for obs in batch]
     len_masks = [obs[2] for obs in batch]
     pos_tags = [obs[3] for obs in batch]
+    complete_labels = [obs[4] for obs in batch]
     embeddings = torch.nn.utils.rnn.pack_sequence(embeddings, enforce_sorted=False)
     labels = torch.nn.utils.rnn.pack_sequence(labels, enforce_sorted=False)
     pos_tags = torch.nn.utils.rnn.pack_sequence(pos_tags, enforce_sorted=False)
-    return embeddings, labels, len_masks, pos_tags
+    complete_labels = torch.nn.utils.rnn.pack_sequence(complete_labels, enforce_sorted=False)
+    return embeddings, labels, len_masks, pos_tags, complete_labels
 
 
 def tag2int(tag: str) -> int:

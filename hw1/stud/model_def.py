@@ -85,11 +85,11 @@ class BiLSTMClassifier(torch.nn.Module):
             x, enforce_sorted=False, batch_first=True, lengths=len_sents
         )
         x = self.rnn_block(x)[0]
-        x, len_seq = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
+        x, len_norep = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
         for layer in self.fc_block:
             x = layer(x)
 
-        return x, len_seq
+        return x, len_norep
 
     def fit(
         self,
@@ -124,7 +124,7 @@ class BiLSTMClassifier(torch.nn.Module):
             threshold=0.01,
             threshold_mode="abs",
             cooldown=1,
-            min_lr=1e-4,
+            min_lr=1e-5,
             verbose=True,
         )  # Scheduler to check lr w.r.t. F1 score
 
@@ -133,7 +133,7 @@ class BiLSTMClassifier(torch.nn.Module):
                 if stage == "train":
                     batch_acc = 0  # batch counter
                     self.train()  # Set train mode for model (activating dropout if present)
-                    for x_batch, y_batch, _, pos_tags in dataloaders[
+                    for x_batch, y_batch, _, pos_tags, _ in dataloaders[
                         stage
                     ]:  # get observation for specific stage (train here)
 
@@ -143,7 +143,7 @@ class BiLSTMClassifier(torch.nn.Module):
                             pos_tags.to(torch_device),
                         )  # Move input tensors to device
 
-                        y_pred, len_seq = self(
+                        y_pred, _ = self(
                             [x_batch, pos_tags]
                         )  # get predictions from model
                         y_batch = torch.nn.utils.rnn.pad_packed_sequence(
@@ -173,7 +173,13 @@ class BiLSTMClassifier(torch.nn.Module):
                         loss_accum = 0  # initialize accumulator of validation loss
                         validation_f1 = 0  # initialize accumulator of validation F1
                         self.eval()  # Evaluation mode (deactivating dropout if present)
-                        for x_batch, y_batch, rep_masks, pos_tags in dataloaders[
+                        for (
+                            x_batch,  # input embeddings
+                            y_batch,  # ground truth grouped
+                            rep_masks,  # rep masks to move from disentangle grouped predictions
+                            pos_tags,   # input pos tag integers
+                            c_y_batch,  # original ground truth (complete ground truth, that's the c)
+                        ) in dataloaders[
                             stage
                         ]:  # Access the validation dataloader
                             # Move the input tensors to right device
@@ -190,7 +196,7 @@ class BiLSTMClassifier(torch.nn.Module):
                                 y_batch, batch_first=True, padding_value=12
                             )[
                                 0
-                            ]  # Ground truth
+                            ]  # Ground truth for training
                             # add to accumulator loss for single batch from validation
                             loss_accum += torch.nn.functional.cross_entropy(
                                 torch.swapaxes(y_pred, 1, 2),
@@ -199,46 +205,48 @@ class BiLSTMClassifier(torch.nn.Module):
                             ).item()
 
                             y_pred = torch.argmax(y_pred, -1)  # Get actual prediction
-                            y_batch = (
-                                y_batch.tolist()
-                            )  # Turn padded ground truth into a list
+
+                            # Pad packed complete ground truth
+                            (
+                                c_y_batch,
+                                len_seq_complete,  # Length of the overall sentence (not grouped)
+                            ) = torch.nn.utils.rnn.pad_packed_sequence(
+                                c_y_batch, batch_first=True
+                            )  # Ground padding truth, moving from packed to normal tensor
+                            c_y_batch = (
+                                c_y_batch.tolist()
+                            )  # Turn padded complete ground truth into a list
                             y_pred = (
                                 y_pred.tolist()
                             )  # Turn padded predictions into a list
-                            # Remove padding predictions and repeat the elements in y_batch and y_pred
+                            # Remove padding for predictions and repeat the elements
                             # according to the rep_mask, in order to account for multi-token entities
-                            y_batch = [
-                                np.repeat(sent[:sent_len], reps).tolist()
-                                for sent, sent_len, reps in zip(
-                                    y_batch, len_seq, rep_masks
-                                )
-                            ]
                             y_pred = [
                                 np.repeat(sent[:sent_len], reps).tolist()
                                 for sent, sent_len, reps in zip(
                                     y_pred, len_seq, rep_masks
                                 )
                             ]
-                            # Decode y_batch and y_pred predictions
-                            y_batch = [
+                            # Decode complete c_y_batch/complete gr. truth (+ remove its padding) and decode predictions
+                            c_y_batch = [
                                 dataloaders[stage]
                                 .dataset.target_encoder.inverse_transform(
-                                    np.array(sent)
+                                    np.array(labs[:sent_len])
                                 )
                                 .tolist()
-                                for sent in y_batch
+                                for labs, sent_len in zip(c_y_batch, len_seq_complete)
                             ]
                             y_pred = [
                                 dataloaders[stage]
                                 .dataset.target_encoder.inverse_transform(
-                                    np.array(sent)
+                                    np.array(labs)
                                 )
                                 .tolist()
-                                for sent in y_pred
+                                for labs in y_pred
                             ]
                             # Finally, compute f1_score with seqeval
                             validation_f1 += f1_score(
-                                y_batch,
+                                c_y_batch,
                                 y_pred,
                                 mode="strict",
                                 average="macro",
@@ -249,9 +257,7 @@ class BiLSTMClassifier(torch.nn.Module):
             val_loss.append(loss_accum / len(dataloaders[stage]))
             seq_F1.append(validation_f1 / len(dataloaders[stage]))
 
-            scheduler.step(
-                seq_F1[-1]
-            )  # LR Scheduler step with current F1 score
+            scheduler.step(seq_F1[-1])  # LR Scheduler step with current F1 score
 
             if seq_F1[-1] > max(
                 seq_F1[:-1], default=0
