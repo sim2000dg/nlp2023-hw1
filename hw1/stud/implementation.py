@@ -2,10 +2,11 @@ import string
 
 import numpy as np
 from typing import List
+import pickle
 
-from model import Model
-from model_def import BiLSTMClassifier
-from utilities import load_embeddings, sample_builder
+from ..model import Model
+from .model_def import BiLSTMClassifier
+from .utilities import load_embeddings, sample_builder
 import torch
 import nltk
 from sklearn.preprocessing import LabelEncoder
@@ -25,11 +26,10 @@ ne_chunker = load(_BINARY_NE_CHUNKER)
 tags = ["SENTIMENT", "CHANGE", "ACTION", "SCENARIO", "POSSESSION"]  # Set of events
 
 
-
 def build_model(device: str) -> Model:
     # STUDENT: return StudentModel()
     # STUDENT: your model MUST be loaded on the device "device" indicates
-    return StudentModel
+    return StudentModel(device)
 
 
 class RandomBaseline(Model):
@@ -60,10 +60,14 @@ class RandomBaseline(Model):
 
 
 class StudentModel(Model, BiLSTMClassifier):
-    def __init__(self):
-        embedding_matrix, self.token_dict = load_embeddings('../../model/embeddings.txt')
-        BiLSTMClassifier.__init__(StudentModel, embedding_matrix, 'LSTM', 200, 1, 3, 0)
-        self.load_state_dict(torch.load('../../model/trained_weights.pth'))
+    def __init__(self, device):
+        with open('model/token_dict.pickle', 'rb') as file:
+            self.token_dict = pickle.load(file)
+        BiLSTMClassifier.__init__(self, None, 'LSTM', 500, 1, 5, 0.3)
+        state_dict = torch.load('model/trained_weights_50015031e31e4.pth')
+        self.load_state_dict(state_dict)
+        self.device = torch.device(device)
+        self.to(self.device)
 
         tags = ["SENTIMENT", "CHANGE", "ACTION", "SCENARIO", "POSSESSION"]  # Set of events
         self.target_encoder = LabelEncoder().fit(
@@ -71,33 +75,39 @@ class StudentModel(Model, BiLSTMClassifier):
         )  # Build encoder to decode/encode labels
 
     def predict(self, tokens: List[List[str]]) -> List[List[str]]:
-        punct_index = [[i for i, x in enumerate(sentence) if i not in string.punctuation] for sentence in tokens]
+        self.eval()  # Inference mode
+
+        punct_index = [[i for i, x in enumerate(sentence) if x in string.punctuation] for sentence in tokens]
 
         emb_indexes = list()
         rep_masks = list()
         pos_tags = list()
         for sentence in tokens:
             pos_tagged = _pos_tag(sentence, None, eng_tagger, 'eng')
-            ne_chunked = ne_chunker(pos_tagged)
+            ne_chunked = ne_chunker.parse(pos_tagged)
             data = sample_builder(ne_chunked, self.token_dict)
             emb_indexes.append(data[0])
             rep_masks.append(data[1])
             pos_tags.append(data[2])
 
-        emb_ind = torch.nn.utils.rnn.pack_sequence(torch.tensor(emb_indexes, dtype=torch.int32))
-        pos_tags = torch.nn.utils.rnn.pack_sequence(torch.torch.tensor(pos_tags, dtype=torch.int32))
-        preds, len_seq = self([emb_ind, pos_tags])
-        preds = torch.squeeze(preds, 0)
-        preds = torch.argmax(preds, -1)
+        with torch.no_grad():
+            emb_ind = torch.nn.utils.rnn.pack_sequence([torch.tensor(sentence, dtype=torch.int32)
+                                                        for sentence in emb_indexes]).to(self.device)
+            pos_tags = torch.nn.utils.rnn.pack_sequence([torch.tensor(sentence, dtype=torch.int32) for
+                                                         sentence in pos_tags]).to(self.device)
+            preds, len_seq = self([emb_ind, pos_tags])
+            preds = torch.argmax(preds, -1)
+            preds = preds.tolist()
+            preds = [x[:len_sentence] for x, len_sentence in zip(preds, len_seq)]
 
-        y_preds = list()
+        decoded_preds = list()
         for sentence_pred, rep_mask, punctuation_pos in zip(preds, rep_masks, punct_index):
             y_pred = np.repeat(sentence_pred, rep_mask)
             y_pred = self.target_encoder.inverse_transform(y_pred).tolist()
             for i in punctuation_pos:
                 y_pred.insert(i, 'O')  # O(n) operation, slow but who cares, this is a short list
-            y_preds.append(y_pred)
+            decoded_preds.append(y_pred)
 
-        return y_preds
+        return decoded_preds
 
 

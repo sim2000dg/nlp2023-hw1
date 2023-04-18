@@ -1,2 +1,2 @@
-import utilities
-from model_def import BiLSTMClassifier
+from .utilities import *
+from .model_def import BiLSTMClassifier

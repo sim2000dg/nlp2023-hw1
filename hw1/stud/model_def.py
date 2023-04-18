@@ -15,16 +15,17 @@ class BiLSTMClassifier(torch.nn.Module):
 
     def __init__(
         self,
-        embedding_matrix: torch.tensor,
-        rnn_type: str,
-        hidden_units: int,
-        layer_rnn: int,
-        layer_dense: int,
-        dropout_p: float,
+        embedding_matrix: torch.tensor = None,
+        rnn_type: str = 'RELU',
+        hidden_units: int = '500',
+        layer_rnn: int = 1,
+        layer_dense: int = 1,
+        dropout_p: float = 0,
     ):
         """
         Initialization method of the model class
-        :param embedding_matrix: Tensor holding the embeddings for tokens/entities.
+        :param embedding_matrix: Tensor holding the embeddings for tokens/entities. If None, a placeholder n_tokens*300
+         is added.
         :param rnn_type: The type of RNN used. 'RNN' for Vanilla RNN, 'LSTM' or 'GRU'.
         :param hidden_units: The amount of hidden units for the RNN hidden state.
         :param layer_rnn: The number of recurrent layers used.
@@ -34,10 +35,10 @@ class BiLSTMClassifier(torch.nn.Module):
         :param dropout_p: The dropout probability for regularization. If p>0, dropout is applied between RNN and after
          all linear layers but the last.
         """
-        super().__init__()
+        super().__init__()  # Call parent initialization
 
-        emb_size = embedding_matrix.shape[1]
-        self.param_dict = dict(
+        emb_size = embedding_matrix.shape[1] if embedding_matrix else 300  # Embedding size
+        self.param_dict = dict(    # Dictionary of parameters to unpack as arguments of recurrent modules
             zip(
                 ["input_size", "hidden_size", "num_layers", "dropout", "bidirectional"],
                 [emb_size + 10, hidden_units, layer_rnn, dropout_p, True],
@@ -53,12 +54,15 @@ class BiLSTMClassifier(torch.nn.Module):
         else:
             raise ValueError("Choose a valid recurrent neural network")
 
-        self.tok_embedding = torch.nn.Embedding.from_pretrained(embedding_matrix)
-        self.pos_layer = torch.nn.Embedding(6, 10, padding_idx=0)
+        if not embedding_matrix:  # Add placeholder when matrix not passed as argument (useful for prediction time)
+            embedding_matrix = torch.zeros(4530031, 300, dtype=torch.float32)
+        self.tok_embedding = torch.nn.Embedding.from_pretrained(embedding_matrix)  # Token embedding layer (frozen)
+        self.pos_layer = torch.nn.Embedding(6, 10, padding_idx=0)  # POS embedding layer (trained)
 
-        self.fc_block = torch.nn.ModuleList()
+        self.fc_block = torch.nn.ModuleList()  # Fully connected block
 
         if layer_dense > 1:
+            # Set difference in hidden units between subsequent dense layers
             dense_shift = (2 * hidden_units - 11) // layer_dense
             for index in range(layer_dense - 1):
                 dense_in = 2 * hidden_units - dense_shift * index
@@ -75,21 +79,21 @@ class BiLSTMClassifier(torch.nn.Module):
         """
         Forward pass for the model.
         """
-        x, y = input_data
-        x, len_sents = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
-        x = self.tok_embedding(x)
-        y = torch.nn.utils.rnn.pad_packed_sequence(y, batch_first=True)[0]
-        y = self.pos_layer(y)
-        x = torch.concatenate([x, y], dim=-1)
+        x, y = input_data  # Receive encoded sentences and encoded POS tagging sequences
+        x, len_sents = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)  # Pad encoded sentences for lookup
+        x = self.tok_embedding(x)  # Lookup for tokens' embeddings
+        y = torch.nn.utils.rnn.pad_packed_sequence(y, batch_first=True)[0]  # Pad POS tagging sequences
+        y = self.pos_layer(y)  # POS tag embeddings
+        x = torch.concatenate([x, y], dim=-1)  # Concatenate token and POS tagging representations
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, enforce_sorted=False, batch_first=True, lengths=len_sents
-        )
-        x = self.rnn_block(x)[0]
-        x, len_norep = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)
-        for layer in self.fc_block:
+        )  # Pack everything back for recurrent block
+        x = self.rnn_block(x)[0]  # Last hidden layer output
+        x, len_norep = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)  # Pad output of recurrent
+        for layer in self.fc_block:  # Fully connected pass
             x = layer(x)
 
-        return x, len_norep
+        return x, len_norep  # Return also length to reverse padding at the end
 
     def fit(
         self,

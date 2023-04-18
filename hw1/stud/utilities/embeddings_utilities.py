@@ -73,5 +73,3 @@ def load_embeddings(path: str):
     embeddings = np.append(embeddings, oov[np.newaxis, :], axis=0)
 
     return torch.from_numpy(embeddings), dict(zip(tokens, range(len(embeddings)-1)))
-
-
