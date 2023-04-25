@@ -16,7 +16,7 @@ class BiLSTMClassifier(torch.nn.Module):
     def __init__(
         self,
         embedding_matrix: torch.tensor = None,
-        rnn_type: str = 'RELU',
+        rnn_type: str = 'LSTM',
         hidden_units: int = '500',
         layer_rnn: int = 1,
         layer_dense: int = 1,
@@ -90,10 +90,10 @@ class BiLSTMClassifier(torch.nn.Module):
         )  # Pack everything back for recurrent block
         x = self.rnn_block(x)[0]  # Last hidden layer output
         x, len_norep = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)  # Pad output of recurrent
-        for layer in self.fc_block:  # Fully connected pass
+        for layer in self.fc_block:  #
             x = layer(x)
 
-        return x, len_norep  # Return also length to reverse padding at the end
+        return x, len_norep
 
     def fit(
         self,
@@ -304,30 +304,3 @@ class BiLSTMClassifier(torch.nn.Module):
         return best_model, loss_history, val_loss, seq_F1
 
 
-if __name__ == "__main__":
-    from utilities import ModelData, obs_collate, load_embeddings
-    import os
-    import numpy as np
-
-    device = torch.device(
-        "mps"
-        if torch.backends.mps.is_available()
-        else "cuda"
-        if torch.cuda.is_available()
-        else "cpu"
-    )
-
-    embeddings, embedding_ind = load_embeddings(
-        os.path.join("../../model", "embeddings.txt")
-    )
-
-    training_data = ModelData("../../data", embedding_ind)
-    val_data = ModelData("../../data", embedding_ind, "dev")
-    train_dataloader = DataLoader(
-        training_data, batch_size=128, shuffle=True, collate_fn=obs_collate
-    )
-    val_dataloader = DataLoader(val_data, batch_size=500, collate_fn=obs_collate)
-    dataloaders = {"train": train_dataloader, "valid": val_dataloader}
-
-    model = BiLSTMClassifier(embeddings, "LSTM", 100, 2, 5, 0)
-    model.fit(20, 1e-3, 1e-4, dataloaders, torch.device("cpu"))

@@ -11,16 +11,15 @@ import torch
 import nltk
 from sklearn.preprocessing import LabelEncoder
 
-
 nltk.download("maxent_ne_chunker")
 nltk.download("words")
-nltk.download('averaged_perceptron_tagger')
+nltk.download("averaged_perceptron_tagger")
 
 from nltk.tag import _get_tagger, _pos_tag
 from nltk.data import load
 from nltk.chunk import _BINARY_NE_CHUNKER
 
-eng_tagger = _get_tagger('eng')
+eng_tagger = _get_tagger("eng")
 ne_chunker = load(_BINARY_NE_CHUNKER)
 
 tags = ["SENTIMENT", "CHANGE", "ACTION", "SCENARIO", "POSSESSION"]  # Set of events
@@ -44,7 +43,7 @@ class RandomBaseline(Model):
         (30, "I-POSSESSION"),
         (505, "I-SCENARIO"),
         (24, "I-SENTIMENT"),
-        (463402, "O")
+        (463402, "O"),
     ]
 
     def __init__(self):
@@ -61,15 +60,21 @@ class RandomBaseline(Model):
 
 class StudentModel(Model, BiLSTMClassifier):
     def __init__(self, device):
-        with open('model/token_dict.pickle', 'rb') as file:
+        with open("model/token_dict.pickle", "rb") as file:
             self.token_dict = pickle.load(file)
-        BiLSTMClassifier.__init__(self, None, 'LSTM', 500, 1, 5, 0.3)
-        state_dict = torch.load('model/trained_weights_50015031e31e4.pth')
+        BiLSTMClassifier.__init__(self, None, "LSTM", 500, 1, 5, 0.3)
+        state_dict = torch.load("model/trained_weights_50015031e31e4.pth")
         self.load_state_dict(state_dict)
         self.device = torch.device(device)
         self.to(self.device)
 
-        tags = ["SENTIMENT", "CHANGE", "ACTION", "SCENARIO", "POSSESSION"]  # Set of events
+        tags = [
+            "SENTIMENT",
+            "CHANGE",
+            "ACTION",
+            "SCENARIO",
+            "POSSESSION",
+        ]  # Set of events
         self.target_encoder = LabelEncoder().fit(
             np.array(["O"] + ["B-" + x for x in tags] + ["I-" + x for x in tags]).T
         )  # Build encoder to decode/encode labels
@@ -77,13 +82,16 @@ class StudentModel(Model, BiLSTMClassifier):
     def predict(self, tokens: List[List[str]]) -> List[List[str]]:
         self.eval()  # Inference mode
 
-        punct_index = [[i for i, x in enumerate(sentence) if x in string.punctuation] for sentence in tokens]
+        punct_index = [
+            [i for i, x in enumerate(sentence) if x in string.punctuation]
+            for sentence in tokens
+        ]
 
         emb_indexes = list()
         rep_masks = list()
         pos_tags = list()
         for sentence in tokens:
-            pos_tagged = _pos_tag(sentence, None, eng_tagger, 'eng')
+            pos_tagged = _pos_tag(sentence, None, eng_tagger, "eng")
             ne_chunked = ne_chunker.parse(pos_tagged)
             data = sample_builder(ne_chunked, self.token_dict)
             emb_indexes.append(data[0])
@@ -91,23 +99,29 @@ class StudentModel(Model, BiLSTMClassifier):
             pos_tags.append(data[2])
 
         with torch.no_grad():
-            emb_ind = torch.nn.utils.rnn.pack_sequence([torch.tensor(sentence, dtype=torch.int32)
-                                                        for sentence in emb_indexes]).to(self.device)
-            pos_tags = torch.nn.utils.rnn.pack_sequence([torch.tensor(sentence, dtype=torch.int32) for
-                                                         sentence in pos_tags]).to(self.device)
+            emb_ind = torch.nn.utils.rnn.pack_sequence(
+                [torch.tensor(sentence, dtype=torch.int32) for sentence in emb_indexes],
+                enforce_sorted=False,
+            ).to(self.device)
+            pos_tags = torch.nn.utils.rnn.pack_sequence(
+                [torch.tensor(sentence, dtype=torch.int32) for sentence in pos_tags],
+                enforce_sorted=False,
+            ).to(self.device)
             preds, len_seq = self([emb_ind, pos_tags])
             preds = torch.argmax(preds, -1)
             preds = preds.tolist()
             preds = [x[:len_sentence] for x, len_sentence in zip(preds, len_seq)]
 
         decoded_preds = list()
-        for sentence_pred, rep_mask, punctuation_pos in zip(preds, rep_masks, punct_index):
+        for sentence_pred, rep_mask, punctuation_pos in zip(
+            preds, rep_masks, punct_index
+        ):
             y_pred = np.repeat(sentence_pred, rep_mask)
             y_pred = self.target_encoder.inverse_transform(y_pred).tolist()
             for i in punctuation_pos:
-                y_pred.insert(i, 'O')  # O(n) operation, slow but who cares, this is a short list
+                y_pred.insert(
+                    i, "O"
+                )  # O(n) operation, slow but who cares, this is a short list
             decoded_preds.append(y_pred)
 
         return decoded_preds
-
-
