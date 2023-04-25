@@ -11,9 +11,9 @@ import torch
 import nltk
 from sklearn.preprocessing import LabelEncoder
 
-nltk.download("maxent_ne_chunker")
-nltk.download("words")
-nltk.download("averaged_perceptron_tagger")
+nltk.download("maxent_ne_chunker", quiet=True)
+nltk.download("words", quiet=True)
+nltk.download("averaged_perceptron_tagger", quiet=True)
 
 from nltk.tag import _get_tagger, _pos_tag
 from nltk.data import load

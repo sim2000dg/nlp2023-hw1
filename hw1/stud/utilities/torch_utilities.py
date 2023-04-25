@@ -11,9 +11,9 @@ import nltk
 from copy import copy
 import os
 
-nltk.download("maxent_ne_chunker")
-nltk.download("words")
-nltk.download("averaged_perceptron_tagger")
+nltk.download("maxent_ne_chunker", quiet=True)
+nltk.download("words", quiet=True)
+nltk.download("averaged_perceptron_tagger", quiet=True)
 
 
 class ModelData(Dataset):
