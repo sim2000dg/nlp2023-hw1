@@ -83,7 +83,7 @@ class ModelData(Dataset):
             i += group_len
 
         # Return "grouped" labels (1 response for grouped tokens) and
-        # "complete" labels (original labels, to ensure fair F1 in test/val)
+        # "complete" labels (original labels, to ensure fair F1 in val)
         return (
             torch.tensor(embeddings, dtype=torch.int32),
             torch.tensor(grouped_labels, dtype=torch.int64),
@@ -98,7 +98,7 @@ class ModelData(Dataset):
 
 def sample_builder(
     tree: nltk.Tree, index_emb: dict[str:int]
-) -> tuple[list[np.array], list[int, ...], list[int, ...]]:
+) -> tuple[list[int, ...], list[int, ...], list[int, ...]]:
     """
     The function takes care of building the actual embedding samples + a "rep mask" which allows tracking the
     length of multi-token expressions which are embedded by a single vector (since they are named entities). This
@@ -152,9 +152,7 @@ def sample_builder(
             except KeyError:  # If named entity not found,
                 # revert to parsing the single tokens forming it as std words
                 for i, token in enumerate(token_set):
-                    if (
-                        token in string.punctuation
-                    ):  # Remove punctuation in entity
+                    if token in string.punctuation:  # Remove punctuation in entity
                         continue
                     rep_mask.append(
                         1
@@ -178,7 +176,15 @@ def sample_builder(
     return embeddings_ind, rep_mask, pos_tags
 
 
-def obs_collate(batch: list[torch.tensor, torch.tensor, list[int], torch.tensor]):
+def obs_collate(
+    batch: list[
+        list[torch.tensor, ...],
+        list[torch.tensor, ...],
+        list[int, ...],
+        list[torch.tensor, ...],
+        list[int, ...],
+    ]
+):
     """
     Simple utility function for DataLoader module.
     """

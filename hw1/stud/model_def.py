@@ -16,8 +16,8 @@ class BiLSTMClassifier(torch.nn.Module):
     def __init__(
         self,
         embedding_matrix: torch.tensor = None,
-        rnn_type: str = 'LSTM',
-        hidden_units: int = '500',
+        rnn_type: str = "LSTM",
+        hidden_units: int = "500",
         layer_rnn: int = 1,
         layer_dense: int = 1,
         dropout_p: float = 0,
@@ -37,8 +37,10 @@ class BiLSTMClassifier(torch.nn.Module):
         """
         super().__init__()  # Call parent initialization
 
-        emb_size = embedding_matrix.shape[1] if embedding_matrix else 300  # Embedding size
-        self.param_dict = dict(    # Dictionary of parameters to unpack as arguments of recurrent modules
+        emb_size = (
+            embedding_matrix.shape[1] if embedding_matrix is not None else 300
+        )  # Embedding size
+        self.param_dict = dict(  # Dictionary of parameters to unpack as arguments of recurrent modules
             zip(
                 ["input_size", "hidden_size", "num_layers", "dropout", "bidirectional"],
                 [emb_size + 10, hidden_units, layer_rnn, dropout_p, True],
@@ -54,10 +56,16 @@ class BiLSTMClassifier(torch.nn.Module):
         else:
             raise ValueError("Choose a valid recurrent neural network")
 
-        if not embedding_matrix:  # Add placeholder when matrix not passed as argument (useful for prediction time)
+        if (
+            embedding_matrix is not None
+        ):  # Add placeholder when matrix not passed as argument (useful for prediction time)
             embedding_matrix = torch.zeros(4530031, 300, dtype=torch.float32)
-        self.tok_embedding = torch.nn.Embedding.from_pretrained(embedding_matrix)  # Token embedding layer (frozen)
-        self.pos_layer = torch.nn.Embedding(6, 10, padding_idx=0)  # POS embedding layer (trained)
+        self.tok_embedding = torch.nn.Embedding.from_pretrained(
+            embedding_matrix
+        )  # Token embedding layer (frozen)
+        self.pos_layer = torch.nn.Embedding(
+            6, 10, padding_idx=0
+        )  # POS embedding layer (trained)
 
         self.fc_block = torch.nn.ModuleList()  # Fully connected block
 
@@ -80,16 +88,24 @@ class BiLSTMClassifier(torch.nn.Module):
         Forward pass for the model.
         """
         x, y = input_data  # Receive encoded sentences and encoded POS tagging sequences
-        x, len_sents = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)  # Pad encoded sentences for lookup
+        x, len_sents = torch.nn.utils.rnn.pad_packed_sequence(
+            x, batch_first=True
+        )  # Pad encoded sentences for lookup
         x = self.tok_embedding(x)  # Lookup for tokens' embeddings
-        y = torch.nn.utils.rnn.pad_packed_sequence(y, batch_first=True)[0]  # Pad POS tagging sequences
+        y = torch.nn.utils.rnn.pad_packed_sequence(y, batch_first=True)[
+            0
+        ]  # Pad POS tagging sequences
         y = self.pos_layer(y)  # POS tag embeddings
-        x = torch.concatenate([x, y], dim=-1)  # Concatenate token and POS tagging representations
+        x = torch.concatenate(
+            [x, y], dim=-1
+        )  # Concatenate token and POS tagging representations
         x = torch.nn.utils.rnn.pack_padded_sequence(
             x, enforce_sorted=False, batch_first=True, lengths=len_sents
         )  # Pack everything back for recurrent block
         x = self.rnn_block(x)[0]  # Last hidden layer output
-        x, len_norep = torch.nn.utils.rnn.pad_packed_sequence(x, batch_first=True)  # Pad output of recurrent
+        x, len_norep = torch.nn.utils.rnn.pad_packed_sequence(
+            x, batch_first=True
+        )  # Pad output of recurrent
         for layer in self.fc_block:  #
             x = layer(x)
 
@@ -229,18 +245,14 @@ class BiLSTMClassifier(torch.nn.Module):
                             # Decode predictions and ground truth with label encoder
                             y_pred = [
                                 dataloaders[stage]
-                                .dataset.target_encoder.inverse_transform(
-                                    np.array(labs)
-                                )
+                                .dataset.target_encoder.inverse_transform(labs)
                                 .tolist()
                                 for labs in y_pred
                             ]
 
                             c_y_batch = [
                                 dataloaders[stage]
-                                .dataset.target_encoder.inverse_transform(
-                                    np.array(labs)
-                                )
+                                .dataset.target_encoder.inverse_transform(labs)
                                 .tolist()
                                 for labs in c_y_batch
                             ]
@@ -268,7 +280,7 @@ class BiLSTMClassifier(torch.nn.Module):
                                 mode="strict",
                                 average="macro",
                                 scheme=IOB2,
-                                zero_division=0
+                                zero_division=0,
                             )  # Compute precision
 
             # append mean validation loss (mean over the number of batches)
@@ -302,5 +314,3 @@ class BiLSTMClassifier(torch.nn.Module):
             )  # Update tqdm bar description with end-of-epoch values
 
         return best_model, loss_history, val_loss, seq_F1
-
-

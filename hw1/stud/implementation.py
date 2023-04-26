@@ -6,7 +6,7 @@ import pickle
 
 from ..model import Model
 from .model_def import BiLSTMClassifier
-from .utilities import load_embeddings, sample_builder
+from .utilities import sample_builder
 import torch
 import nltk
 from sklearn.preprocessing import LabelEncoder
@@ -22,12 +22,8 @@ from nltk.chunk import _BINARY_NE_CHUNKER
 eng_tagger = _get_tagger("eng")
 ne_chunker = load(_BINARY_NE_CHUNKER)
 
-tags = ["SENTIMENT", "CHANGE", "ACTION", "SCENARIO", "POSSESSION"]  # Set of events
-
 
 def build_model(device: str) -> Model:
-    # STUDENT: return StudentModel()
-    # STUDENT: your model MUST be loaded on the device "device" indicates
     return StudentModel(device)
 
 
@@ -59,7 +55,7 @@ class RandomBaseline(Model):
 
 
 class StudentModel(Model, BiLSTMClassifier):
-    def __init__(self, device):
+    def __init__(self, device: str) -> None:
         with open("model/token_dict.pickle", "rb") as file:
             self.token_dict = pickle.load(file)
         BiLSTMClassifier.__init__(self, None, "LSTM", 500, 1, 5, 0.3)
@@ -91,28 +87,30 @@ class StudentModel(Model, BiLSTMClassifier):
         rep_masks = list()
         pos_tags = list()
         for sentence in tokens:
-            pos_tagged = _pos_tag(sentence, None, eng_tagger, "eng")
-            ne_chunked = ne_chunker.parse(pos_tagged)
-            data = sample_builder(ne_chunked, self.token_dict)
+            pos_tagged = _pos_tag(sentence, None, eng_tagger, "eng")  # Return pos tagged sentence
+            ne_chunked = ne_chunker.parse(pos_tagged)  # Chunked sentence for NE recognition
+            data = sample_builder(ne_chunked, self.token_dict)  # Build sample with utility func
+            # Append integers
             emb_indexes.append(data[0])
             rep_masks.append(data[1])
             pos_tags.append(data[2])
 
-        with torch.no_grad():
+        with torch.no_grad():  # We don't need to track gradient for inference
             emb_ind = torch.nn.utils.rnn.pack_sequence(
                 [torch.tensor(sentence, dtype=torch.int32) for sentence in emb_indexes],
                 enforce_sorted=False,
-            ).to(self.device)
+            ).to(self.device)  # Packed tensor for token embeddings
             pos_tags = torch.nn.utils.rnn.pack_sequence(
                 [torch.tensor(sentence, dtype=torch.int32) for sentence in pos_tags],
                 enforce_sorted=False,
-            ).to(self.device)
-            preds, len_seq = self([emb_ind, pos_tags])
-            preds = torch.argmax(preds, -1)
-            preds = preds.tolist()
-            preds = [x[:len_sentence] for x, len_sentence in zip(preds, len_seq)]
+            ).to(self.device)  # Packed tensor for POS tags
+            preds, len_seq = self([emb_ind, pos_tags])  # Get probabilities and sentence length
+            preds = torch.argmax(preds, -1)  # Get predictions
+            preds = preds.tolist()  # Turn predictions into a digestible list
+            preds = [x[:len_sentence] for x, len_sentence in zip(preds, len_seq)]  # Cut (padded) sentence
 
         decoded_preds = list()
+        # Decode the predictions, add 0 label for punctuation and repeat predictions to account for NE chunking
         for sentence_pred, rep_mask, punctuation_pos in zip(
             preds, rep_masks, punct_index
         ):
