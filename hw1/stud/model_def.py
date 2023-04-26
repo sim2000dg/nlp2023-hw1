@@ -57,7 +57,7 @@ class BiLSTMClassifier(torch.nn.Module):
             raise ValueError("Choose a valid recurrent neural network")
 
         if (
-            embedding_matrix is not None
+            embedding_matrix is None
         ):  # Add placeholder when matrix not passed as argument (useful for prediction time)
             embedding_matrix = torch.zeros(4530031, 300, dtype=torch.float32)
         self.tok_embedding = torch.nn.Embedding.from_pretrained(
