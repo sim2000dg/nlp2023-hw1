@@ -72,7 +72,7 @@ class ModelData(Dataset):
         )  # Save output in a dictionary to speed up lookup
 
     def __getitem__(self, item):
-        labels = self.target_encoder.transform(self.labels[item])
+        labels = self.target_encoder.transform(self.labels[item]).tolist()
         tree = self.chunked[item]
         embeddings, rep_mask, pos_tags = sample_builder(tree, self.index_emb)
 
