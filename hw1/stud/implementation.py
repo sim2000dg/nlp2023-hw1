@@ -4,7 +4,7 @@ import numpy as np
 from typing import List
 import pickle
 
-from ..model import Model
+from model import Model
 from .model_def import BiLSTMClassifier
 from .utilities import sample_builder
 import torch
