@@ -58,10 +58,13 @@ class StudentModel(Model, BiLSTMClassifier):
     def __init__(self, device: str) -> None:
         with open("model/token_dict.pickle", "rb") as file:
             self.token_dict = pickle.load(file)
+        # Call parent class (the actual model class) initialization
         BiLSTMClassifier.__init__(self, None, "LSTM", 500, 1, 5, 0.3)
+        # Load everything needed into memory
         state_dict = torch.load("model/trained_weights_50015031e31e4.pth")
         self.load_state_dict(state_dict)
         self.device = torch.device(device)
+        # Move model to device
         self.to(self.device)
 
         tags = [
@@ -81,7 +84,7 @@ class StudentModel(Model, BiLSTMClassifier):
         punct_index = [
             [i for i, x in enumerate(sentence) if x in string.punctuation]
             for sentence in tokens
-        ]
+        ]  # Remove punctuation (to be considered then "0")
 
         emb_indexes = list()
         rep_masks = list()

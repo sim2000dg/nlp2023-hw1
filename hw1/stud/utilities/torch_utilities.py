@@ -21,6 +21,7 @@ class ModelData(Dataset):
         self, data_folder: str, embedding_ind: dict, subset: str = "train"
     ) -> None:
         """
+        Specification of Torch Dataset class for this task.
         :param data_folder: Folder where train, test and validation data is present
         :param embedding_ind: A dictionary mapping each token to its index in the embedding matrix
         :param subset: Which split, train, test or dev/validation
@@ -47,8 +48,10 @@ class ModelData(Dataset):
         with open(os.path.join(data_folder, subset) + ".jsonl", "r") as file:
             for line in file:
                 line = json.loads(line)
-                self.tokens[line["idx"]] = line["tokens"]
-                # ignore label for punctuation (it would be 0)
+                self.tokens[line["idx"]] = line[
+                    "tokens"
+                ]  # punctuation here is kept for downstream POS tagging and NER
+                # ignore label for punctuation, in training data punctuation is **always** 'O'
                 self.labels[line["idx"]] = [
                     y
                     for x, y in zip(line["tokens"], line["labels"])
@@ -71,7 +74,11 @@ class ModelData(Dataset):
             zip(self.tokens.keys(), chunked)
         )  # Save output in a dictionary to speed up lookup
 
-    def __getitem__(self, item):
+    def __getitem__(
+        self, item: int
+    ) -> tuple[
+        torch.tensor, torch.tensor, list[int, ...], torch.tensor, list[int, ...]
+    ]:
         labels = self.target_encoder.transform(self.labels[item]).tolist()
         tree = self.chunked[item]
         embeddings, rep_mask, pos_tags = sample_builder(tree, self.index_emb)
@@ -100,13 +107,13 @@ def sample_builder(
     tree: nltk.Tree, index_emb: dict[str:int]
 ) -> tuple[list[int, ...], list[int, ...], list[int, ...]]:
     """
-    The function takes care of building the actual embedding samples + a "rep mask" which allows tracking the
-    length of multi-token expressions which are embedded by a single vector (since they are named entities). This
+    The function takes care of building the actual sample of integer encodings + a "rep mask" which allows tracking the
+    length of multi-token expressions which are to embedded by a single vector (since they are named entities). This
     extra step is useful downstream. Additionally, it also outputs integers encoding POS tagging of the tokens.
-    It takes as input the NLTK tree outputted by the named entity chunking.
+    It takes as input the NLTK tree outputted by the named entity chunker.
     :param tree: The Tree class from NLTK containing named entity (binary) tagging.
-    :param index_emb: The dictionary mapping tokens/entities to vocabulary indexes
-    :return: List of embeddings + list of the lengths of the expressions embedded + list of pos tag integer encoding
+    :param index_emb: The dictionary mapping tokens/entities to vocabulary indexes/integers.
+    :return: List of token integers + list of lengths of expressions integer encoded + list of pos tag integer encoding.
     """
     tree = copy(tree)  # Avoid side effect on obj by shallow copying
 

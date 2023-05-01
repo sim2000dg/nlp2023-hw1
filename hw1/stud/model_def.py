@@ -10,7 +10,7 @@ from copy import deepcopy
 class BiLSTMClassifier(torch.nn.Module):
     """
     Main model class, relatively flexible in order to facilitate hyperparameter tuning. More details about the model
-    can be found looking at the initialization method. Training operations are performed by the `fit` function.
+    can be found looking at the initialization method. Training operations are performed by the `fit` method.
     """
 
     def __init__(
@@ -25,15 +25,15 @@ class BiLSTMClassifier(torch.nn.Module):
         """
         Initialization method of the model class
         :param embedding_matrix: Tensor holding the embeddings for tokens/entities. If None, a placeholder n_tokens*300
-         is added.
+         is added, expecting embedding weights of that shape to be loaded along with the other model weights.
         :param rnn_type: The type of RNN used. 'RNN' for Vanilla RNN, 'LSTM' or 'GRU'.
         :param hidden_units: The amount of hidden units for the RNN hidden state.
         :param layer_rnn: The number of recurrent layers used.
         :param layer_dense: The number of feedforward layer used. Must be > 1, since 1 is needed to compute the logits
          from the upmost hidden state. ReLU is used as activation function. The number of hidden units is chosen
          automatically, progressively decreasing from the number of RNN hidden units to the number of classes/events.
-        :param dropout_p: The dropout probability for regularization. If p>0, dropout is applied between RNN and after
-         all linear layers but the last.
+        :param dropout_p: The dropout probability for regularization. If p>0, dropout is applied between stacked RNN
+          and after all linear layers but the last.
         """
         super().__init__()  # Call parent initialization
 
@@ -83,7 +83,12 @@ class BiLSTMClassifier(torch.nn.Module):
 
         self.fc_block.append(torch.nn.Linear(dense_out, 11))
 
-    def forward(self, input_data):
+    def forward(
+        self,
+        input_data: list[
+            torch.nn.utils.rnn.PackedSequence, torch.nn.utils.rnn.PackedSequence
+        ],
+    ) -> tuple[torch.tensor, torch.tensor]:
         """
         Forward pass for the model.
         """
@@ -106,7 +111,7 @@ class BiLSTMClassifier(torch.nn.Module):
         x, len_norep = torch.nn.utils.rnn.pad_packed_sequence(
             x, batch_first=True
         )  # Pad output of recurrent
-        for layer in self.fc_block:  #
+        for layer in self.fc_block:
             x = layer(x)
 
         return x, len_norep
@@ -204,7 +209,7 @@ class BiLSTMClassifier(torch.nn.Module):
                             y_batch,  # ground truth grouped
                             rep_masks,  # rep masks to use for disentangling grouped predictions
                             pos_tags,  # input pos tag integers
-                            c_y_batch,  # original ground truth (complete ground truth, that's the c)
+                            c_y_batch,  # original ground truth to ensure fair F1 (complete ground truth, that's the c)
                         ) in dataloaders[
                             stage
                         ]:  # Access the validation dataloader
